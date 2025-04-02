@@ -1190,18 +1190,24 @@
                 console.log(`Punch arm rotation: ${rightArmLower.rotation.y.toFixed(2)}`);
             } 
             else if (attackType === 'kick') {
-                // Kick animation - move leg forward (not up/down)
+                // Kick animation - lift leg up and extend toward opponent
                 
-                // Upper leg rotation - rotate around Y axis to kick forward
-                rightLegUpper.rotation.y = directionMultiplier * CONFIG.ANIMATION.kickLegUpperRotation * animCurve;
+                // Calculate the maximum rotation for the kick
+                const maxUpperLegRotation = CONFIG.ANIMATION.kickLegUpperRotation * animCurve;
                 
-                // Lower leg rotation - keep some X rotation for natural kick motion
-                rightLegLower.rotation.x = CONFIG.ANIMATION.kickLegLowerRotation * animCurve * 0.5;
+                // Upper leg rotation - rotate sideways from the hip (y-axis rotation)
+                rightLegUpper.rotation.y = directionMultiplier * maxUpperLegRotation * 0.2; // Reduced sideways rotation to prevent knee separation
                 
-                // Add some Z rotation for a more natural sideways kick
-                rightLegLower.rotation.z = directionMultiplier * CONFIG.ANIMATION.kickLegLowerRotation * animCurve * 0.5;
+                // Add z rotation to bend thigh towards opponent
+                rightLegUpper.rotation.z = directionMultiplier * maxUpperLegRotation * 0.6; // Kept the same
                 
-                console.log(`Kick leg rotations: upper=${rightLegUpper.rotation.y.toFixed(2)}, lower=${rightLegLower.rotation.z.toFixed(2)}`);
+                // Increase x rotation for higher kick (more hip flexion)
+                rightLegUpper.rotation.x = -maxUpperLegRotation * 1.2; // Increased hip flexion
+                
+                // Adjust knee bend for higher kick (more knee extension)
+                rightLegLower.rotation.x = maxUpperLegRotation * 1.5; // Increased knee extension
+                
+                console.log(`Kick leg rotations: upper-y=${rightLegUpper.rotation.y.toFixed(2)}, upper-z=${rightLegUpper.rotation.z.toFixed(2)}, upper-x=${rightLegUpper.rotation.x.toFixed(2)}, lower-x=${rightLegLower.rotation.x.toFixed(2)}`);
             }
         }
 
