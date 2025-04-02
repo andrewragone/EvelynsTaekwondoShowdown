@@ -912,54 +912,74 @@
 
         // --- Game Logic ---
          function updatePlayer(deltaTime) {
-             if (!player || !player.userData || gameState !== 'gameplay') return;
-
-             // --- Movement ---
-             const moveSpeed = CONFIG.MOVEMENT.speed;
-             let moveDelta = 0;
-             if (keysPressed['ArrowLeft'] || keysPressed['MobileLeft']) moveDelta -= moveSpeed;
-             if (keysPressed['ArrowRight'] || keysPressed['MobileRight']) moveDelta += moveSpeed;
-
-             player.position.x += moveDelta;
-
-             // Clamp position within boundaries
-             player.position.x = Math.max(CONFIG.ARENA.boundaryLeft, player.position.x);
-             // Prevent overlapping opponent *only if opponent exists*
-             if (opponent && opponent.position) {
-                  const opponentBoundary = opponent.position.x - CONFIG.CHARACTER.bodyRadius * 2; // Where player should stop
-                  player.position.x = Math.min(opponent.position.x, player.position.x);
-             } else {
-                // If no opponent yet, use the general right boundary
-                 player.position.x = Math.min(CONFIG.ARENA.boundaryRight, player.position.x);
+             if (gameState !== 'gameplay' || !player) return;
+            
+            // --- Movement ---
+            let moveDirection = 0;
+            
+            if (keysPressed['ArrowLeft']) moveDirection -= 1;
+            if (keysPressed['ArrowRight']) moveDirection += 1;
+            
+            // Check for mobile controls
+            if (activeMobileInputs['left']) moveDirection -= 1;
+            if (activeMobileInputs['right']) moveDirection += 1;
+            
+            if (moveDirection !== 0 && !player.userData.attacking) {
+                // Calculate new position
+                const newX = player.position.x + moveDirection * CONFIG.MOVEMENT.speed * deltaTime * 60;
+                
+                // Check arena boundaries
+                if (newX > CONFIG.ARENA.boundaryLeft && newX < CONFIG.ARENA.boundaryRight) {
+                    // Check for collision with opponent
+                    if (opponent) {
+                        const playerRadius = CONFIG.CHARACTER.bodyRadius;
+                        const opponentRadius = CONFIG.CHARACTER.bodyRadius;
+                        const minDistance = playerRadius + opponentRadius;
+                        
+                        // Calculate potential new distance between characters
+                        const potentialDistance = Math.abs(newX - opponent.position.x);
+                        
+                        // Only move if we won't collide with opponent
+                        if (potentialDistance >= minDistance) {
+                            player.position.x = newX;
+                        } else {
+                            // If moving toward opponent, stop at collision distance
+                            if ((moveDirection > 0 && player.position.x < opponent.position.x) || 
+                                (moveDirection < 0 && player.position.x > opponent.position.x)) {
+                                // Calculate the maximum allowed position
+                                if (player.position.x < opponent.position.x) {
+                                    player.position.x = opponent.position.x - minDistance;
+                                } else {
+                                    player.position.x = opponent.position.x + minDistance;
+                                }
+                            }
+                        }
+                    } else {
+                        // No opponent, just move
+                        player.position.x = newX;
+                    }
+                }
             }
-
-
-           // --- Jumping ---
-           const groundY = CONFIG.CHARACTER.legLowerLength / 2; // Base ground position
-           if (player.userData.jumping) {
-               player.position.y += player.userData.velocityY;
-               player.userData.velocityY -= CONFIG.MOVEMENT.gravity;
-
-               if (player.position.y <= groundY) {
-                   player.position.y = groundY;
-                   player.userData.jumping = false;
-                   player.userData.velocityY = 0;
-               }
-           } else {
-                // Ensure player stays on ground if not jumping
-                player.position.y = groundY;
-           }
-
+            
+            // --- Jumping ---
+            if (player.userData.jumping) {
+                player.position.y += player.userData.velocityY * deltaTime * 60;
+                player.userData.velocityY -= CONFIG.MOVEMENT.gravity * deltaTime * 60;
+                
+                if (player.position.y <= CONFIG.CHARACTER.legLowerLength / 2) {
+                    player.position.y = CONFIG.CHARACTER.legLowerLength / 2;
+                    player.userData.jumping = false;
+                    player.userData.velocityY = 0;
+                }
+            }
+            
             // --- Attack Timer & Animation Update ---
             if (player.userData.attacking) {
-                // Convert deltaTime to milliseconds for the timer
                 player.userData.attackTimer -= deltaTime * 1000;
-                
                 console.log("Player attacking:", player.userData.attackType, 
                            "Timer:", player.userData.attackTimer.toFixed(0), 
                            "DeltaTime:", deltaTime.toFixed(3));
                 
-                // Update animation
                 updateAttackAnimation(player, deltaTime);
                 
                 if (player.userData.attackTimer <= 0) {
@@ -971,42 +991,71 @@
                     if (opponent) checkAttackHit(player, opponent);
                 }
             }
-
+            
             updateHealthBar(true, player.userData.health);
         }
 
         function updateOpponent(deltaTime) {
-            if (!opponent || !opponent.userData || gameState !== 'gameplay') return;
+            if (gameState !== 'gameplay' || !opponent) return;
+            
             const now = clock.getElapsedTime();
-            const groundY = CONFIG.CHARACTER.legLowerLength / 2;
-
-            // Ensure opponent stays on ground (no AI jump implemented)
-            opponent.position.y = groundY;
-
+            
             // --- AI Movement Logic ---
             if (now > opponent.userData.nextMoveTime && !opponent.userData.attacking) {
-                // Decide on a new random move
+                // Decide whether to change direction
+                if (Math.random() < 0.5) {
+                    opponent.userData.moveDirection = (Math.random() < 0.5) ? -1 : 1;
+                }
+                
+                // Set next move decision time
                 opponent.userData.nextMoveTime = now + Math.random() * (CONFIG.AI.moveIntervalMax - CONFIG.AI.moveIntervalMin) / 1000 + CONFIG.AI.moveIntervalMin / 1000;
-                opponent.userData.moveDirection = (Math.random() < 0.5) ? -1 : 1; // -1 = left, 1 = right
             }
-
-            // Move opponent according to current direction
-            if (!opponent.userData.attacking && now < opponent.userData.nextMoveTime && player && player.position) {
-                // Move toward player with some randomness
-                const moveDirection = (opponent.position.x > player.position.x) ? -1 : 1;
-                opponent.position.x += moveDirection * CONFIG.MOVEMENT.speed * 0.5; // Slower than player
+            
+            // Apply movement if not attacking
+            if (!opponent.userData.attacking) {
+                const moveDirection = opponent.userData.moveDirection;
                 
-                // Clamp position within boundaries
-                opponent.position.x = Math.max(CONFIG.ARENA.boundaryLeft, opponent.position.x);
-                opponent.position.x = Math.min(CONFIG.ARENA.boundaryRight, opponent.position.x);
-                
-                // Prevent overlapping player
-                const playerBoundary = player.position.x + CONFIG.CHARACTER.bodyRadius * 2;
-                if (moveDirection > 0) { // Moving right
-                    opponent.position.x = Math.min(opponent.position.x, playerBoundary);
+                if (moveDirection !== 0) {
+                    // Calculate new position
+                    const newX = opponent.position.x + moveDirection * CONFIG.MOVEMENT.speed * 0.7 * deltaTime * 60; // AI moves slightly slower
+                    
+                    // Check arena boundaries
+                    if (newX > CONFIG.ARENA.boundaryLeft && newX < CONFIG.ARENA.boundaryRight) {
+                        // Check for collision with player
+                        if (player) {
+                            const opponentRadius = CONFIG.CHARACTER.bodyRadius;
+                            const playerRadius = CONFIG.CHARACTER.bodyRadius;
+                            const minDistance = opponentRadius + playerRadius;
+                            
+                            // Calculate potential new distance between characters
+                            const potentialDistance = Math.abs(newX - player.position.x);
+                            
+                            // Only move if we won't collide with player
+                            if (potentialDistance >= minDistance) {
+                                opponent.position.x = newX;
+                            } else {
+                                // If moving toward player, stop at collision distance
+                                if ((moveDirection > 0 && opponent.position.x < player.position.x) || 
+                                    (moveDirection < 0 && opponent.position.x > player.position.x)) {
+                                    // Calculate the maximum allowed position
+                                    if (opponent.position.x < player.position.x) {
+                                        opponent.position.x = player.position.x - minDistance;
+                                    } else {
+                                        opponent.position.x = player.position.x + minDistance;
+                                    }
+                                }
+                            }
+                        } else {
+                            // No player, just move
+                            opponent.position.x = newX;
+                        }
+                    } else {
+                        // Reverse direction if hitting boundary
+                        opponent.userData.moveDirection *= -1;
+                    }
                 }
             }
-
+            
             // --- AI Attack Logic ---
             if (now > opponent.userData.nextAttackTime && !opponent.userData.attacking) {
                 // Decide whether to attack
@@ -1020,7 +1069,7 @@
                 // Set next attack time regardless of whether we attacked
                 opponent.userData.nextAttackTime = now + Math.random() * (CONFIG.AI.attackIntervalMax - CONFIG.AI.attackIntervalMin) / 1000 + CONFIG.AI.attackIntervalMin / 1000;
             }
-
+            
             // --- Attack Timer & Animation Update ---
             if (opponent.userData.attacking) {
                 opponent.userData.attackTimer -= deltaTime * 1000;
@@ -1039,32 +1088,31 @@
                     if (player) checkAttackHit(opponent, player);
                 }
             }
-
+            
             updateHealthBar(false, opponent.userData.health);
         }
 
+        function checkAttackHit(attacker, target) {
+            if (!attacker || !target || !attacker.userData || !target.userData || !attacker.userData.attacking) return;
 
-         function checkAttackHit(attacker, target) {
-             if (!attacker || !target || !attacker.userData || !target.userData || !attacker.userData.attacking) return;
+            const attackType = attacker.userData.attackType;
+            const reach = (attackType === 'punch') ? CONFIG.ATTACK.punchReach : CONFIG.ATTACK.kickReach;
+            const damage = (attackType === 'punch') ? CONFIG.ATTACK.punchDamage : CONFIG.ATTACK.kickDamage;
 
-             const attackType = attacker.userData.attackType;
-             const reach = (attackType === 'punch') ? CONFIG.ATTACK.punchReach : CONFIG.ATTACK.kickReach;
-             const damage = (attackType === 'punch') ? CONFIG.ATTACK.punchDamage : CONFIG.ATTACK.kickDamage;
+            // Check distance between origins
+            const distance = attacker.position.distanceTo(target.position);
 
-             // Check distance between origins
-             const distance = attacker.position.distanceTo(target.position);
+            if (distance < reach) {
+                if (!attacker.userData.hitThisAttack) {
+                    target.userData.health -= damage;
+                    target.userData.health = Math.max(0, target.userData.health);
+                    attacker.userData.hitThisAttack = true; // Mark hit for this attack sequence
 
-             if (distance < reach) {
-                 if (!attacker.userData.hitThisAttack) {
-                     target.userData.health -= damage;
-                     target.userData.health = Math.max(0, target.userData.health);
-                     attacker.userData.hitThisAttack = true; // Mark hit for this attack sequence
+                    console.log(`${attacker.userData.id} hit ${target.userData.id} (${attackType}). ${target.userData.id} health: ${target.userData.health}`);
 
-                     console.log(`${attacker.userData.id} hit ${target.userData.id} (${attackType}). ${target.userData.id} health: ${target.userData.health}`);
-
-                     // Check for win/loss condition
-                     if (target.userData.health <= 0) {
-                         if(target.userData.id === 'opponent') {
+                    // Check for win/loss condition
+                    if (target.userData.health <= 0) {
+                        if(target.userData.id === 'opponent') {
                               console.log("Player wins!");
                               setupEnding();
                          } else {
@@ -1123,27 +1171,37 @@
             
             console.log(`${attackType} animation: progress=${progress.toFixed(2)}, curve=${animCurve.toFixed(2)}, timer=${character.userData.attackTimer.toFixed(0)}`);
             
+            // Determine the direction based on which character is attacking
+            // Player faces right, opponent faces left
+            const isPlayer = character.userData.id === 'player';
+            const directionMultiplier = isPlayer ? 1 : -1;
+            
             if (attackType === 'punch') {
-                // Punch animation - extend arm
+                // Punch animation - extend arm forward (not up/down)
                 const baseRotation = -Math.PI / 6; // Starting rotation
-                const targetRotation = CONFIG.ANIMATION.punchArmRotation;
-                const currentRotation = baseRotation + (targetRotation - baseRotation) * animCurve;
                 
-                // Apply rotation to arm
-                rightArmLower.rotation.z = currentRotation;
-                console.log(`Punch arm rotation: ${currentRotation.toFixed(2)}`);
+                // For punch, we want to rotate around the Y axis to punch forward
+                // We'll keep a bit of the Z rotation for natural arm position
+                rightArmLower.rotation.z = baseRotation;
+                
+                // Rotate around Y axis to punch forward toward opponent
+                rightArmLower.rotation.y = directionMultiplier * CONFIG.ANIMATION.punchArmRotation * animCurve;
+                
+                console.log(`Punch arm rotation: ${rightArmLower.rotation.y.toFixed(2)}`);
             } 
             else if (attackType === 'kick') {
-                // Kick animation - move leg
-                // Upper leg rotation
-                const upperLegRotation = CONFIG.ANIMATION.kickLegUpperRotation * animCurve;
-                rightLegUpper.rotation.x = upperLegRotation;
+                // Kick animation - move leg forward (not up/down)
                 
-                // Lower leg rotation
-                const lowerLegRotation = CONFIG.ANIMATION.kickLegLowerRotation * animCurve;
-                rightLegLower.rotation.x = lowerLegRotation;
+                // Upper leg rotation - rotate around Y axis to kick forward
+                rightLegUpper.rotation.y = directionMultiplier * CONFIG.ANIMATION.kickLegUpperRotation * animCurve;
                 
-                console.log(`Kick leg rotations: upper=${upperLegRotation.toFixed(2)}, lower=${lowerLegRotation.toFixed(2)}`);
+                // Lower leg rotation - keep some X rotation for natural kick motion
+                rightLegLower.rotation.x = CONFIG.ANIMATION.kickLegLowerRotation * animCurve * 0.5;
+                
+                // Add some Z rotation for a more natural sideways kick
+                rightLegLower.rotation.z = directionMultiplier * CONFIG.ANIMATION.kickLegLowerRotation * animCurve * 0.5;
+                
+                console.log(`Kick leg rotations: upper=${rightLegUpper.rotation.y.toFixed(2)}, lower=${rightLegLower.rotation.z.toFixed(2)}`);
             }
         }
 
@@ -1187,6 +1245,7 @@
             const leftLegLower = character.userData.leftLegLower;
             const rightLegLower = character.userData.rightLegLower;
 
+            // Reset all rotations (x, y, z) for each limb
             if(leftArmUpper) leftArmUpper.rotation.set(0, 0, Math.PI / 6);
             if(rightArmUpper) rightArmUpper.rotation.set(0, 0, -Math.PI / 6);
             if(leftArmLower) leftArmLower.rotation.set(0, 0, Math.PI / 6);
@@ -1196,8 +1255,28 @@
             if(leftLegLower) leftLegLower.rotation.set(0, 0, 0);
             if(rightLegLower) rightLegLower.rotation.set(0, 0, 0);
 
-            if(rightArmLower && rightArmLower.userData) { delete rightArmLower.userData.animProgress; delete rightArmLower.userData.targetRotation; }
-            if(rightLegLower && rightLegLower.userData) { delete rightLegLower.userData.animProgress; delete rightLegLower.userData.targetRotation; }
+            // Clear any animation data
+            if(rightArmLower && rightArmLower.userData) { 
+                delete rightArmLower.userData.animProgress; 
+                delete rightArmLower.userData.animDuration;
+                delete rightArmLower.userData.targetRotation;
+                delete rightArmLower.userData.targetAxis;
+            }
+            
+            if(rightLegUpper && rightLegUpper.userData) {
+                delete rightLegUpper.userData.animProgress;
+                delete rightLegUpper.userData.animDuration;
+                delete rightLegUpper.userData.targetRotation;
+                delete rightLegUpper.userData.targetAxis;
+            }
+            
+            if(rightLegLower && rightLegLower.userData) {
+                delete rightLegLower.userData.animProgress;
+                delete rightLegLower.userData.animDuration;
+                delete rightLegLower.userData.targetRotation;
+                delete rightLegLower.userData.targetAxis;
+            }
+            
             if(character.userData) delete character.userData.hitThisAttack;
         }
 
@@ -1231,54 +1310,53 @@
             }
         }
 
-         function updateEndingAnimation(deltaTime) {
-             const now = clock.getElapsedTime();
+        function updateEndingAnimation(deltaTime) {
+            const now = clock.getElapsedTime();
 
-             // Text Fade
-             if (endText && player && player.userData) { // Ensure objects exist
-                 if (endText.material.opacity < 1 && player.userData.endFadeInTimer && now >= player.userData.endFadeInTimer) {
-                      endText.material.opacity = Math.min(1, endText.material.opacity + deltaTime / (CONFIG.ANIMATION.textFadeTime / 1000));
+            // Text Fade
+            if (endText && player && player.userData) { // Ensure objects exist
+                if (endText.material.opacity < 1 && player.userData.endFadeInTimer && now >= player.userData.endFadeInTimer) {
+                     endText.material.opacity = Math.min(1, endText.material.opacity + deltaTime / (CONFIG.ANIMATION.textFadeTime / 1000));
+                }
+            }
+
+            // Victory Pose
+            if (player && player.userData && player.userData.victoryAnim && player.userData.leftArmUpper && player.userData.rightArmUpper) {
+                const anim = player.userData.victoryAnim;
+                const leftArm = player.userData.leftArmUpper;
+                const rightArm = player.userData.rightArmUpper;
+                const poseSpeed = CONFIG.ANIMATION.victoryPoseSpeed;
+                const maxRotation = -Math.PI / 3; // Raise arms higher
+
+                if (anim.raising) {
+                     leftArm.rotation.x = Math.max(maxRotation, leftArm.rotation.x - poseSpeed);
+                     rightArm.rotation.x = Math.max(maxRotation, rightArm.rotation.x - poseSpeed); // Match left arm logic
+                     if (leftArm.rotation.x <= maxRotation) {
+                         anim.raising = false; anim.holding = true; anim.holdTimer = now + 1.5; // Hold longer
+                     }
+                 } else if (anim.holding && now >= anim.holdTimer) {
+                     anim.holding = false; anim.returning = true; // Add returning state
+                 } else if (anim.returning) {
+                     leftArm.rotation.x = Math.min(0, leftArm.rotation.x + poseSpeed * 1.5);
+                     rightArm.rotation.x = Math.min(0, rightArm.rotation.x + poseSpeed * 1.5);
+                     if (leftArm.rotation.x >= 0) {
+                         anim.returning = false; // Stop returning
+                         // Optional: restart anim.raising = true;
+                     }
                  }
-             }
+            }
 
-             // Victory Pose
-             if (player && player.userData && player.userData.victoryAnim && player.userData.leftArmUpper && player.userData.rightArmUpper) {
-                 const anim = player.userData.victoryAnim;
-                 const leftArm = player.userData.leftArmUpper;
-                 const rightArm = player.userData.rightArmUpper;
-                 const poseSpeed = CONFIG.ANIMATION.victoryPoseSpeed;
-                 const maxRotation = -Math.PI / 3; // Raise arms higher
-
-                 if (anim.raising) {
-                      leftArm.rotation.x = Math.max(maxRotation, leftArm.rotation.x - poseSpeed);
-                      rightArm.rotation.x = Math.max(maxRotation, rightArm.rotation.x - poseSpeed); // Match left arm logic
-                      if (leftArm.rotation.x <= maxRotation) {
-                          anim.raising = false; anim.holding = true; anim.holdTimer = now + 1.5; // Hold longer
-                      }
-                  } else if (anim.holding && now >= anim.holdTimer) {
-                      anim.holding = false; anim.returning = true; // Add returning state
-                  } else if (anim.returning) {
-                      leftArm.rotation.x = Math.min(0, leftArm.rotation.x + poseSpeed * 1.5);
-                      rightArm.rotation.x = Math.min(0, rightArm.rotation.x + poseSpeed * 1.5);
-                      if (leftArm.rotation.x >= 0) {
-                          anim.returning = false; // Stop returning
-                          // Optional: restart anim.raising = true;
-                      }
-                  }
-             }
-
-             // Confetti
-             confetti.forEach(particle => {
-                  particle.position.add(particle.userData.velocity);
-                  particle.rotation.x += Math.random() * 0.1;
-                  particle.rotation.y += Math.random() * 0.1;
-                  if (particle.position.y < CONFIG.CONFETTI.despawnY) {
-                       particle.position.set( (Math.random() - 0.5) * CONFIG.ARENA.width * 0.8, CONFIG.CONFETTI.spawnY + Math.random(), (Math.random() - 0.5) * 2 );
-                       particle.userData.velocity.y = -CONFIG.CONFETTI.fallSpeed * (0.8 + Math.random() * 0.4);
-                  }
-              });
-          }
-
+            // Confetti
+            confetti.forEach(particle => {
+                 particle.position.add(particle.userData.velocity);
+                 particle.rotation.x += Math.random() * 0.1;
+                 particle.rotation.y += Math.random() * 0.1;
+                 if (particle.position.y < CONFIG.CONFETTI.despawnY) {
+                      particle.position.set( (Math.random() - 0.5) * CONFIG.ARENA.width * 0.8, CONFIG.CONFETTI.spawnY + Math.random(), (Math.random() - 0.5) * 2 );
+                      particle.userData.velocity.y = -CONFIG.CONFETTI.fallSpeed * (0.8 + Math.random() * 0.4);
+                 }
+             });
+         }
 
         // --- Main Loop ---
         function animate() {
