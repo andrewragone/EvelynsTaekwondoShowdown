@@ -20,6 +20,34 @@
             display: none; /* Hidden by default, shown in gameplay */
             z-index: 10; /* Ensure it's above canvas */
         }
+        /* Add styles for HTML health bars */
+        .health-bar {
+            position: fixed;
+            top: 10px;
+            width: 200px;
+            height: 20px;
+            border: 2px solid #fff;
+            background-color: #333;
+            z-index: 10;
+            display: none; /* Hidden by default, shown in gameplay */
+            overflow: hidden; /* Ensure the fill doesn't overflow */
+            border-radius: 5px; /* Rounded corners */
+        }
+        #player-health-bar {
+            left: 10px;
+        }
+        #opponent-health-bar {
+            right: 10px;
+        }
+        .health-bar-fill {
+            width: 100%;
+            height: 100%;
+            background-color: #f00;
+            transform-origin: left center;
+        }
+        #opponent-health-bar-fill {
+            transform-origin: right center;
+        }
     </style>
 </head>
 <body>
@@ -27,11 +55,17 @@
         Desktop: Arrow Keys (Move/Jump), Spacebar (Attack)<br>
         Mobile: Use On-Screen Buttons
     </div>
+    <div id="player-health-bar" class="health-bar">
+        <div id="player-health-bar-fill" class="health-bar-fill"></div>
+    </div>
+    <div id="opponent-health-bar" class="health-bar">
+        <div id="opponent-health-bar-fill" class="health-bar-fill"></div>
+    </div>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r134/three.min.js"></script>
     <script>
         // --- Configuration ---
         const CONFIG = {
-            CAMERA_POS: new THREE.Vector3(0, 2, 7),
+            CAMERA_POS: new THREE.Vector3(0, 2, 6), // Moved camera closer to better frame the skinnier dojo
             CHARACTER: {
                 bodyRadius: 0.4, bodyHeight: 1.5,
                 headRadius: 0.3,
@@ -46,12 +80,12 @@
                 jointColor: 0x333333,
             },
             ARENA: {
-                width: 10,
+                width: 8, // Reduced from 10 to make the dojo skinnier
                 floorColor: 0xd3d3d3,
-                playerStartX: -2,
-                opponentStartX: 2,
-                boundaryLeft: -4.5, // Adjusted boundaries slightly
-                boundaryRight: 4.5,
+                playerStartX: -1.5, // Moved player closer to center
+                opponentStartX: 1.5, // Moved opponent closer to center
+                boundaryLeft: -3, // Narrower boundaries
+                boundaryRight: 3, // Narrower boundaries
             },
             MOVEMENT: {
                 speed: 0.05,
@@ -70,8 +104,9 @@
             },
             HEALTH: {
                 max: 100,
-                barWidth: 2, barHeight: 0.2, barOffset: 1.8,
+                barWidth: 2, barHeight: 0.2, barOffset: 2.5, // Increased from 1.8 to position above heads
                 barColor: 0xff0000,
+                barBackgroundColor: 0x333333, // Added background color for better visibility
             },
             UI: {
                 font: 'bold 32px Arial',
@@ -216,11 +251,9 @@
         function setupIntro() {
             clearScene();
             
-            // Remove any existing HTML button first (in case it wasn't cleaned up)
-            const existingButton = document.getElementById('startFightButton');
-            if (existingButton) {
-                existingButton.parentNode.removeChild(existingButton);
-            }
+            // Hide health bars
+            document.getElementById('player-health-bar').style.display = 'none';
+            document.getElementById('opponent-health-bar').style.display = 'none';
             
             gameState = 'intro';
             scene.background = new THREE.Color(CONFIG.COLORS.introBg);
@@ -297,12 +330,12 @@
             });
             floor = new THREE.Mesh(floorGeometry, floorMaterial);
             floor.rotation.x = -Math.PI / 2;
-            floor.position.y = -0.01; // Slightly below characters
+            floor.position.y = -0.75; // Lowered to be below the characters' feet
             scene.add(floor);
             
             // Add grid pattern to simulate tatami mats
             const gridHelper = new THREE.GridHelper(CONFIG.ARENA.width, 10, 0x8b4513, 0x8b4513);
-            gridHelper.position.y = 0.01;
+            gridHelper.position.y = -0.74; // Positioned just above the floor
             scene.add(gridHelper);
             
             document.getElementById('instructions').style.display = 'block';
@@ -319,15 +352,8 @@
             opponent.userData.nextAttackTime = clock.getElapsedTime() + Math.random() * (CONFIG.AI.attackIntervalMax - CONFIG.AI.attackIntervalMin) + CONFIG.AI.attackIntervalMin;
             scene.add(opponent);
 
-            playerHealthBar = createHealthBar();
-            playerHealthBar.position.set(player.position.x, player.position.y + CONFIG.HEALTH.barOffset, player.position.z);
-            playerHealthBar.userData.initialX = playerHealthBar.position.x; // Store initial X for scaling
-            scene.add(playerHealthBar);
-
-            opponentHealthBar = createHealthBar();
-            opponentHealthBar.position.set(opponent.position.x, opponent.position.y + CONFIG.HEALTH.barOffset, opponent.position.z);
-            opponentHealthBar.userData.initialX = opponentHealthBar.position.x;
-            scene.add(opponentHealthBar);
+            // Create HTML-based health bars instead of Three.js objects
+            createHTMLHealthBars();
 
             keysPressed = {};
             activeMobileInputs = {};
@@ -337,6 +363,10 @@
 
         function setupEnding() {
             clearScene();
+            
+            // Hide health bars
+            document.getElementById('player-health-bar').style.display = 'none';
+            document.getElementById('opponent-health-bar').style.display = 'none';
             
             // Remove any existing HTML buttons
             const startFightButton = document.getElementById('startFightButton');
@@ -570,7 +600,7 @@
 
             context.font = `bold ${fontSize}px Arial`; // Re-apply
 
-            context.fillStyle = `rgb(${Math.floor(color >> 16 & 255)}, ${Math.floor(color >> 8 & 255)}, ${Math.floor(color & 255)})`;
+            context.fillStyle = `rgba(${Math.floor(color >> 16 & 255)}, ${Math.floor(color >> 8 & 255)}, ${Math.floor(color & 255)}, ${0.7})`;
             context.fillRect(0, 0, canvas.width, canvas.height);
 
             context.fillStyle = CONFIG.UI.fontColor;
@@ -587,62 +617,80 @@
             return mesh;
         }
 
-        function createHealthBar() {
-            const geometry = new THREE.PlaneGeometry(CONFIG.HEALTH.barWidth, CONFIG.HEALTH.barHeight);
-            const material = new THREE.MeshBasicMaterial({ color: CONFIG.HEALTH.barColor, depthTest: false, depthWrite: false });
-            const bar = new THREE.Mesh(geometry, material);
-            bar.renderOrder = 1; // Ensure health bar renders on top
-            return bar;
+        function createHTMLHealthBars() {
+            const playerHealthBar = document.getElementById('player-health-bar');
+            const opponentHealthBar = document.getElementById('opponent-health-bar');
+
+            // Show the health bars during gameplay
+            playerHealthBar.style.display = 'block';
+            opponentHealthBar.style.display = 'block';
+
+            // Reset health bar fills to full
+            const playerHealthBarFill = document.getElementById('player-health-bar-fill');
+            playerHealthBarFill.style.width = '100%';
+            if (playerHealthBarFill.style.transform) {
+                playerHealthBarFill.style.transform = '';
+            }
+
+            const opponentHealthBarFill = document.getElementById('opponent-health-bar-fill');
+            opponentHealthBarFill.style.width = '100%';
+            if (opponentHealthBarFill.style.transform) {
+                opponentHealthBarFill.style.transform = '';
+            }
         }
 
-        function updateHealthBar(bar, currentHealth, ownerPosition) {
-            if (!bar) return;
+        function updateHealthBar(isPlayer, currentHealth) {
+            const healthBar = isPlayer ? document.getElementById('player-health-bar-fill') : document.getElementById('opponent-health-bar-fill');
             const healthPercentage = Math.max(0, currentHealth / CONFIG.HEALTH.max);
-            bar.scale.x = healthPercentage;
-            // Position relative to owner, adjust for scaling from center
-            bar.position.x = ownerPosition.x - (CONFIG.HEALTH.barWidth * (1 - healthPercentage)) / 2;
-            bar.position.y = ownerPosition.y + CONFIG.HEALTH.barOffset;
-            bar.position.z = ownerPosition.z; // Keep Z aligned
+            
+            if (isPlayer) {
+                // Player health bar shrinks from right to left (stays fixed to left edge)
+                healthBar.style.width = `${healthPercentage * 100}%`;
+            } else {
+                // Opponent health bar shrinks from left to right (stays fixed to right edge)
+                healthBar.style.width = `${healthPercentage * 100}%`;
+                // For right-aligned bar, we need to use transform to make it shrink from left to right
+                healthBar.style.transform = `scaleX(${healthPercentage})`;
+            }
         }
 
+        function createMobileControls() {
+            const buttonSize = CONFIG.UI.mobileButtonSize;
+            const opacity = CONFIG.UI.mobileButtonOpacity;
 
-         function createMobileControls() {
-             const buttonSize = CONFIG.UI.mobileButtonSize;
-             const opacity = CONFIG.UI.mobileButtonOpacity;
+            const createButton = (color, name, icon) => {
+                const canvas = document.createElement('canvas');
+                canvas.width = 64; canvas.height = 64;
+                const ctx = canvas.getContext('2d');
 
-             const createButton = (color, name, icon) => {
-                 const canvas = document.createElement('canvas');
-                 canvas.width = 64; canvas.height = 64;
-                 const ctx = canvas.getContext('2d');
+                ctx.fillStyle = `rgba(${Math.floor(color >> 16 & 255)}, ${Math.floor(color >> 8 & 255)}, ${Math.floor(color & 255)}, ${opacity})`;
+                ctx.beginPath(); ctx.arc(32, 32, 30, 0, Math.PI * 2); ctx.fill();
 
-                 ctx.fillStyle = `rgba(${Math.floor(color >> 16 & 255)}, ${Math.floor(color >> 8 & 255)}, ${Math.floor(color & 255)}, ${opacity})`;
-                 ctx.beginPath(); ctx.arc(32, 32, 30, 0, Math.PI * 2); ctx.fill();
+                ctx.fillStyle = 'white'; ctx.strokeStyle = 'black'; ctx.lineWidth = 3;
+                if (icon === 'left') { ctx.beginPath(); ctx.moveTo(45, 15); ctx.lineTo(19, 32); ctx.lineTo(45, 49); ctx.stroke(); ctx.fill(); }
+                else if (icon === 'right') { ctx.beginPath(); ctx.moveTo(19, 15); ctx.lineTo(45, 32); ctx.lineTo(19, 49); ctx.stroke(); ctx.fill(); }
+                else if (icon === 'up') { ctx.beginPath(); ctx.moveTo(32, 15); ctx.lineTo(47, 30); ctx.lineTo(37, 30); ctx.lineTo(37, 49); ctx.lineTo(27, 49); ctx.lineTo(27, 30); ctx.lineTo(17, 30); ctx.closePath(); ctx.stroke(); ctx.fill(); }
+                else if (icon === 'attack') { ctx.beginPath(); for (let i = 0; i < 8; i++) { const angle = (i / 8) * Math.PI * 2; const radius = (i % 2 === 0) ? 20 : 15; ctx.lineTo(32 + Math.cos(angle) * radius, 32 + Math.sin(angle) * radius); } ctx.closePath(); ctx.stroke(); ctx.fill(); }
 
-                 ctx.fillStyle = 'white'; ctx.strokeStyle = 'black'; ctx.lineWidth = 3;
-                 if (icon === 'left') { ctx.beginPath(); ctx.moveTo(45, 15); ctx.lineTo(19, 32); ctx.lineTo(45, 49); ctx.stroke(); ctx.fill(); }
-                 else if (icon === 'right') { ctx.beginPath(); ctx.moveTo(19, 15); ctx.lineTo(45, 32); ctx.lineTo(19, 49); ctx.stroke(); ctx.fill(); }
-                 else if (icon === 'up') { ctx.beginPath(); ctx.moveTo(32, 15); ctx.lineTo(47, 30); ctx.lineTo(37, 30); ctx.lineTo(37, 49); ctx.lineTo(27, 49); ctx.lineTo(27, 30); ctx.lineTo(17, 30); ctx.closePath(); ctx.stroke(); ctx.fill(); }
-                 else if (icon === 'attack') { ctx.beginPath(); for (let i = 0; i < 8; i++) { const angle = (i / 8) * Math.PI * 2; const radius = (i % 2 === 0) ? 20 : 15; ctx.lineTo(32 + Math.cos(angle) * radius, 32 + Math.sin(angle) * radius); } ctx.closePath(); ctx.stroke(); ctx.fill(); }
+                const texture = new THREE.CanvasTexture(canvas); texture.needsUpdate = true; texture.minFilter = THREE.LinearFilter;
+                const geo = new THREE.PlaneGeometry(buttonSize, buttonSize);
+                // Use MeshBasicMaterial, depthTest: false to ensure they are drawn on top and don't interact with scene depth
+                const mat = new THREE.MeshBasicMaterial({ map: texture, transparent: true, opacity: 1, depthTest: false, depthWrite: false });
+                const mesh = new THREE.Mesh(geo, mat);
+                mesh.visible = false;
+                mesh.userData.action = name;
+                mesh.renderOrder = 2; // Render mobile controls above everything else
+                camera.add(mesh); // Add to camera
+                return mesh;
+            };
 
-                 const texture = new THREE.CanvasTexture(canvas); texture.needsUpdate = true; texture.minFilter = THREE.LinearFilter;
-                 const geo = new THREE.PlaneGeometry(buttonSize, buttonSize);
-                 // Use MeshBasicMaterial, depthTest: false to ensure they are drawn on top and don't interact with scene depth
-                 const mat = new THREE.MeshBasicMaterial({ map: texture, transparent: true, opacity: 1, depthTest: false, depthWrite: false });
-                 const mesh = new THREE.Mesh(geo, mat);
-                 mesh.visible = false;
-                 mesh.userData.action = name;
-                 mesh.renderOrder = 2; // Render mobile controls above everything else
-                 camera.add(mesh); // Add to camera
-                 return mesh;
-             };
-
-             mobileButtons.left = createButton(CONFIG.COLORS.mobileLeftRight, 'moveLeft', 'left');
-             mobileButtons.right = createButton(CONFIG.COLORS.mobileLeftRight, 'moveRight', 'right');
-             mobileButtons.jump = createButton(CONFIG.COLORS.mobileJump, 'jump', 'up');
-             mobileButtons.punch = createButton(CONFIG.COLORS.mobilePunch, 'attackPunch', 'attack');
-             mobileButtons.kick = createButton(CONFIG.COLORS.mobileKick, 'attackKick', 'attack');
-             positionMobileControls(); // Set initial positions
-         }
+            mobileButtons.left = createButton(CONFIG.COLORS.mobileLeftRight, 'moveLeft', 'left');
+            mobileButtons.right = createButton(CONFIG.COLORS.mobileLeftRight, 'moveRight', 'right');
+            mobileButtons.jump = createButton(CONFIG.COLORS.mobileJump, 'jump', 'up');
+            mobileButtons.punch = createButton(CONFIG.COLORS.mobilePunch, 'attackPunch', 'attack');
+            mobileButtons.kick = createButton(CONFIG.COLORS.mobileKick, 'attackKick', 'attack');
+            positionMobileControls(); // Set initial positions
+        }
 
         function positionMobileControls() {
             if(!mobileButtons.left) return; // Don't position if not created yet
@@ -918,7 +966,7 @@
                  }
              }
 
-             updateHealthBar(playerHealthBar, player.userData.health, player.position);
+             updateHealthBar(true, player.userData.health);
              // player.userData.boundingBox.setFromObject(player, true); // Optional for debug
         }
 
@@ -969,7 +1017,7 @@
                  }
              }
 
-             updateHealthBar(opponentHealthBar, opponent.userData.health, opponent.position);
+             updateHealthBar(false, opponent.userData.health);
              // opponent.userData.boundingBox.setFromObject(opponent, true); // Optional for debug
         }
 
