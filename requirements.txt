@@ -1,0 +1,165 @@
+Product Requirements Document (PRD)
+Project Title: Evelyn’s Taekwondo Showdown: 8th Birthday Party Edition
+Version: 1.0
+
+Date: April 01, 2025
+
+Author: Grok 3 (xAI)
+
+1. Overview
+1.1 Purpose
+Develop a fun, engaging, web-based taekwondo fighting video game using Three.js to celebrate Evelyn’s 8th birthday on April 26, 2025. The game acts as a digital invitation and teaser for her birthday party at UMAC Briarcliff Taekwondo School, exciting her friends (aged 6-10) and building anticipation. It must be playable on both desktop web browsers and mobile devices, hosted online, and shared via a URL with parents of invited kids.
+
+1.2 Target Audience
+Primary Users: Children aged 6-10, Evelyn’s friends attending her birthday party.
+Secondary Users: Parents, who will share the game link and may supervise gameplay.
+1.3 Platform
+Web-based game running in:
+Desktop browsers: Google Chrome, Mozilla Firefox, Safari, Microsoft Edge.
+Mobile browsers: Chrome and Safari on iOS/Android smartphones and tablets.
+Hosted at: https://<yourusername>.github.io/evelynstaekwondoshowdown/ using GitHub Pages.
+1.4 Objective
+Build a Street Fighter-style taekwondo fighting game with raw Three.js code (no external 3D models).
+Include an animated introduction linking to Evelyn’s 8th birthday at UMAC Briarcliff.
+Feature a single, simple taekwondo fight with basic controls and a win condition.
+End with a “To Be Continued” message and party details to encourage attendance.
+Ensure the game is lightweight, responsive, and easy to share via a URL.
+2. Features
+2.1 Game Introduction
+Description: An animated intro screen to welcome players and set the context.
+Details:
+Text:
+text
+
+Collapse
+
+Wrap
+
+Copy
+Evelyn’s Taekwondo Showdown: 8th Birthday Party Edition  
+Get ready to kick it at UMAC Briarcliff!  
+Displayed in bold, white, Arial font with a black outline, centered on the screen.
+Text fades in over 2 seconds, remains for 3 seconds, then fades out.
+Visuals:
+A 3D taekwondo character representing Evelyn, built with raw Three.js:
+Body: THREE.CylinderGeometry(0.5, 0.5, 1.5, 8) (radiusTop, radiusBottom, height, radialSegments), colored white (0xffffff) for a gi.
+Arms: Two THREE.CylinderGeometry(0.2, 0.2, 1, 8) attached to the body, angled outward, white.
+Legs: Two THREE.CylinderGeometry(0.2, 0.2, 1, 8) below the body, white.
+Belt: THREE.BoxGeometry(1, 0.1, 0.1) wrapped around the waist, colored black (0x000000).
+Head: THREE.SphereGeometry(0.3, 8, 8) on top, colored beige (0xf5d7b2) for skin.
+Animation: Evelyn performs a front kick—right leg rotates 45 degrees forward on the X-axis over 0.5 seconds, then back to neutral.
+Background: Solid light blue (0x87ceeb) using scene.background.
+Button:
+“Start Fight” button, styled as a red rectangle (THREE.PlaneGeometry(2, 0.5)) with white text (“Start Fight” in Arial), centered below the character.
+On click/tap, transition to the gameplay scene.
+Sound (Optional): Upbeat 8-bit music loop (e.g., royalty-free chiptune from Free Music Archive), played via THREE.Audio if implemented.
+2.2 Gameplay (Taekwondo Fight)
+Description: A single-player, Street Fighter-style taekwondo match against an AI opponent.
+Details:
+Player Character (Evelyn):
+Same structure as intro character (cylinder body, arms, legs, belt, sphere head).
+Positioned on the left side of the screen at (x: -2, y: 0, z: 0).
+Health: 100 points, displayed as a red THREE.PlaneGeometry(2, 0.2) bar above the character, shrinking as health decreases.
+Opponent (Mystery Challenger):
+Identical structure to Evelyn but with a red gi (0xff0000) and no belt.
+Positioned on the right side at (x: 2, y: 0, z: 0).
+Health: 100 points, with a red health bar above.
+Controls:
+Desktop:
+Left Arrow: Move left (decrease x by 0.1 per frame, min x: -4).
+Right Arrow: Move right (increase x by 0.1 per frame, max x: 0).
+Up Arrow: Jump (increase y by 1 over 0.5 seconds, then fall back).
+Spacebar: Attack (kick or punch, see mechanics).
+Mobile:
+On-screen buttons:
+Left arrow (THREE.PlaneGeometry(0.5, 0.5)), gray, bottom-left corner.
+Right arrow (THREE.PlaneGeometry(0.5, 0.5)), gray, next to left arrow.
+Jump button (THREE.PlaneGeometry(0.5, 0.5)), yellow, bottom-center.
+Attack button (THREE.PlaneGeometry(0.5, 0.5)), red, bottom-right.
+Buttons use raycaster to detect taps.
+Mechanics:
+Moves:
+Punch: Right arm rotates 30 degrees forward on X-axis over 0.3 seconds, then back. Deals 10 damage if within 1 unit of opponent.
+Kick: Right leg rotates 45 degrees forward on X-axis over 0.5 seconds, then back. Deals 15 damage if within 1.5 units.
+Spacebar alternates between punch and kick (first press: punch, second: kick, etc.).
+Jump: Body moves up 1 unit, holds for 0.2 seconds, then falls back (gravity simulation).
+AI Opponent:
+Moves randomly left/right every 1-2 seconds (x += or -= 0.1).
+Attacks every 2-3 seconds (randomly punch or kick).
+Deals 10 damage if within 1 unit of player.
+Collision: Use THREE.Box3 bounding boxes around characters to detect attack hits.
+Win Condition: Reduce opponent’s health to 0.
+Setting:
+Floor: THREE.PlaneGeometry(10, 10) rotated 90 degrees on X-axis, colored light gray (0xd3d3d3) to mimic a mat.
+Background: Solid dark blue (0x00008b) using scene.background.
+Camera: THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000) positioned at (x: 0, y: 2, z: 5), looking at (0, 0, 0).
+2.3 Ending Screen
+Description: A celebratory outro linking to Evelyn’s birthday party.
+Details:
+Text:
+text
+
+Collapse
+
+Wrap
+
+Copy
+Victory! To Be Continued at Evelyn’s Birthday Party!  
+Join us at UMAC Briarcliff  
+528 N State Rd, Briarcliff Manor, NY 10510  
+April 26, 2025  
+White Arial font with black outline, centered, fades in over 2 seconds.
+Visuals:
+Evelyn’s character (same as gameplay) at (x: 0, y: 0, z: 0) doing a victory pose:
+Both arms rotate upward 45 degrees on X-axis, hold for 1 second, then back.
+Confetti: 50 THREE.SphereGeometry(0.05, 8, 8) particles, random colors (0xff0000, 0x00ff00, 0x0000ff), falling from (y: 5) to (y: -5) over 3 seconds.
+Background: Solid purple (0x800080).
+Button:
+“Play Again” button, green THREE.PlaneGeometry(2, 0.5) with white “Play Again” text, centered below text.
+On click/tap, reloads the gameplay scene.
+2.4 Accessibility & Sharing
+Description: Ensure the game is easy to access and share.
+Details:
+Hosted on GitHub Pages at https://<yourusername>.github.io/evelynstaekwondoshowdown/.
+Single HTML file with embedded JS/CSS, no external dependencies beyond Three.js (loaded via CDN: https://cdnjs.cloudflare.com/ajax/libs/three.js/r134/three.min.js).
+Responsive: Adjust camera aspect ratio and button sizes based on window.innerWidth and window.innerHeight.
+3. Technical Requirements
+3.1 Framework
+Three.js: Use version r134 (or latest stable) for 3D rendering.
+HTML5: Single <canvas> element for rendering.
+JavaScript: Game logic, controls, and animations in raw JS.
+CSS: Minimal styling for full-screen canvas (width: 100vw; height: 100vh; margin: 0;).
+3.2 Performance
+Target 30 FPS on low-end devices (e.g., iPhone 8, budget Android).
+Limit draw calls: Max 100 objects in scene (characters, floor, buttons, confetti).
+File size <5 MB (HTML, JS, Three.js CDN).
+3.3 Compatibility
+Test on Chrome, Firefox, Safari (desktop/mobile).
+Use window.addEventListener('resize', () => { camera.aspect = window.innerWidth / window.innerHeight; camera.updateProjectionMatrix(); renderer.setSize(window.innerWidth, window.innerHeight); }) for responsiveness.
+3.4 Assets
+All assets created in-code with Three.js primitives (BoxGeometry, CylinderGeometry, SphereGeometry, PlaneGeometry).
+No external textures or models; use solid colors via THREE.MeshBasicMaterial.
+4. User Flow
+User opens https://<yourusername>.github.io/evelynstaekwondoshowdown/ in browser.
+Intro screen loads with title, Evelyn’s animated kick, and “Start Fight” button.
+User clicks/taps “Start Fight” to enter gameplay.
+User fights the opponent using keyboard/touch controls until opponent’s health reaches 0.
+Ending screen appears with victory message, party details, and “Play Again” button.
+User can replay or share the URL.
+5. Scope & Constraints
+5.1 In Scope
+Intro screen with animated Evelyn and title.
+Single-player taekwondo fight with basic moves (punch, kick, jump, move).
+Ending screen with party details.
+Mobile/desktop compatibility using raw Three.js.
+5.2 Out of Scope
+Multiplayer mode.
+Multiple levels or opponents.
+Sound effects (optional, only if time allows).
+5.3 Constraints
+Must be ready by April 20, 2025, for sharing before April 26, 2025.
+Uses only raw Three.js, no external tools like Blender.
+6. Success Metrics
+Game runs at 30 FPS on 90% of tested devices.
+Loads in <5 seconds on a 4G connection.
+Positive feedback from 5+ kids/parents.
