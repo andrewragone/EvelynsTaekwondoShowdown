@@ -157,6 +157,7 @@
         let mobileButtons = {};
         let keysPressed = {}; // Store pressed keys/buttons
         let activeMobileInputs = {}; // Track active pointer IDs for mobile buttons
+        let backgroundSprite; // New global variable for background sprite
 
         // Initial player/opponent states
         const initialPlayerState = { jumping: false, velocityY: 0, attacking: false, attackType: 'punch', attackTimer: 0, lastAttackTime: 0, health: CONFIG.HEALTH.max, id: 'player' };
@@ -198,60 +199,52 @@
         }
 
         function setupSceneLighting() {
-            const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
+            if (!backgroundSprite) {
+                const textureLoader = new THREE.TextureLoader();
+                textureLoader.load('http://localhost:8000/dojo.jpg', 
+                    (texture) => {
+                        console.log('Background texture loaded successfully');
+                        const spriteMaterial = new THREE.SpriteMaterial({ map: texture });
+                        backgroundSprite = new THREE.Sprite(spriteMaterial);
+                        
+                        // Increase scale proportionally for zoom effect
+                        const zoomFactor = 3; // Adjust this value for desired zoom level
+                        backgroundSprite.scale.set(16 * zoomFactor, 9 * zoomFactor, 1);
+                        backgroundSprite.position.z = -15; // Move back further to accommodate zoom
+                        scene.add(backgroundSprite);
+                    },
+                    undefined,
+                    (err) => console.error('Error loading background texture:', err)
+                );
+            } else {
+                scene.add(backgroundSprite);
+            }
+
+            // Add ambient light
+            const ambientLight = new THREE.AmbientLight(0xffffff, 0.5);
             scene.add(ambientLight);
-            const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
-            directionalLight.position.set(5, 10, 7.5);
+
+            // Add directional light
+            const directionalLight = new THREE.DirectionalLight(0xffffff, 0.5);
+            directionalLight.position.set(1, 1, 1).normalize();
             scene.add(directionalLight);
         }
 
         // --- State Management & Scene Setup ---
         function clearScene() {
-             const objectsToRemove = [];
-             scene.children.forEach(child => {
-                 if (child !== camera && !(child instanceof THREE.Light) && !Object.values(mobileButtons).includes(child) && child.type !== 'Group') { // Keep mobile buttons, check type for confetti group
-                      objectsToRemove.push(child);
-                 }
-                 // Remove specific groups like confetti
-                  if (child.name === 'confettiGroup') {
-                      objectsToRemove.push(child);
-                  }
-             });
-             // Remove player/opponent groups explicitly if they exist
-             if (player && player.parent === scene) scene.remove(player);
-             if (opponent && opponent.parent === scene) scene.remove(opponent);
-
-
-            objectsToRemove.forEach(obj => {
-                 if (obj.geometry) obj.geometry.dispose();
-                 if (obj.material) {
-                     if (Array.isArray(obj.material)) {
-                         obj.material.forEach(mat => {
-                              if (mat.map) mat.map.dispose();
-                              mat.dispose();
-                         });
-                     } else {
-                          if (obj.material.map) obj.material.map.dispose();
-                          obj.material.dispose();
-                     }
-                 }
-                 if(obj.parent === scene) scene.remove(obj); // Only remove top-level objects
-             });
-             player = null; // Nullify references
-             opponent = null;
-             playerHealthBar = null;
-             opponentHealthBar = null;
-             introText = null;
-             startButton = null;
-             endText = null;
-             playAgainButton = null;
-             floor = null;
-             confetti = [];
-             document.getElementById('instructions').style.display = 'none';
-             keysPressed = {}; // Reset keys
-             activeMobileInputs = {}; // Reset active touches
+            if (introText) scene.remove(introText);
+            if (startButton) scene.remove(startButton);
+            if (endText) scene.remove(endText);
+            if (playAgainButton) scene.remove(playAgainButton);
+            if (floor) scene.remove(floor);
+            if (player) scene.remove(player);
+            if (opponent) scene.remove(opponent);
+            confetti.forEach(confetto => scene.remove(confetto));
+            confetti = [];
+            
+            // Don't remove backgroundSprite
+            Object.values(mobileButtons).forEach(btn => { btn.visible = false; });
         }
-
 
         function setupIntro() {
             clearScene();
@@ -261,7 +254,6 @@
             document.getElementById('opponent-health-bar').style.display = 'none';
             
             gameState = 'intro';
-            scene.background = new THREE.Color(CONFIG.COLORS.introBg);
             Object.values(mobileButtons).forEach(btn => { btn.visible = false; });
 
             player = createCharacter(CONFIG.CHARACTER.giColor, true);
@@ -323,36 +315,18 @@
             
             gameState = 'gameplay';
             
-            // Set a solid color background instead of using an image (to avoid CORS issues)
-            scene.background = new THREE.Color(CONFIG.COLORS.gameBg);
-            
-            // Create a simple dojo floor with a pattern
-            const floorGeometry = new THREE.PlaneGeometry(CONFIG.ARENA.width, CONFIG.ARENA.width);
-            const floorMaterial = new THREE.MeshStandardMaterial({ 
-                color: 0xd2b48c, // Tan color for tatami mat appearance
-                side: THREE.DoubleSide,
-                roughness: 0.8
-            });
-            floor = new THREE.Mesh(floorGeometry, floorMaterial);
-            floor.rotation.x = -Math.PI / 2;
-            floor.position.y = -0.75; // Lowered to be below the characters' feet
-            scene.add(floor);
-            
-            // Add grid pattern to simulate tatami mats
-            const gridHelper = new THREE.GridHelper(CONFIG.ARENA.width, 10, 0x8b4513, 0x8b4513);
-            gridHelper.position.y = -0.74; // Positioned just above the floor
-            scene.add(gridHelper);
-            
             document.getElementById('instructions').style.display = 'block';
 
             player = createCharacter(CONFIG.CHARACTER.giColor, true);
-            player.position.set(CONFIG.ARENA.playerStartX, 0.75, 0);
+            // Use the calculated ground level for initial position
+            player.position.set(CONFIG.ARENA.playerStartX, CONFIG.CHARACTER.legLowerLength / 2, 0);
             // Preserve the limb references by merging the initial state into the existing userData
             Object.assign(player.userData, initialPlayerState);
             scene.add(player);
 
             opponent = createCharacter(CONFIG.CHARACTER.opponentGiColor, false);
-            opponent.position.set(CONFIG.ARENA.opponentStartX, 0.75, 0);
+            // Use the calculated ground level for initial position
+            opponent.position.set(CONFIG.ARENA.opponentStartX, CONFIG.CHARACTER.legLowerLength / 2, 0);
             // Preserve the limb references by merging the initial state into the existing userData
             Object.assign(opponent.userData, initialOpponentState);
             opponent.userData.nextMoveTime = clock.getElapsedTime() + Math.random() * (CONFIG.AI.moveIntervalMax - CONFIG.AI.moveIntervalMin) / 1000 + CONFIG.AI.moveIntervalMin / 1000;
@@ -386,7 +360,6 @@
             }
             
             gameState = 'ending';
-            scene.background = new THREE.Color(CONFIG.COLORS.endBg);
             Object.values(mobileButtons).forEach(btn => { btn.visible = false; });
 
             player = createCharacter(CONFIG.CHARACTER.giColor, true);
@@ -1177,37 +1150,38 @@
             const directionMultiplier = isPlayer ? 1 : -1;
             
             if (attackType === 'punch') {
-                // Punch animation - extend arm forward (not up/down)
-                const baseRotation = -Math.PI / 6; // Starting rotation
+                // Punch animation - extend arm forward and upward
+                const baseRotation = -Math.PI / 4; // Starting rotation (increased from -π/6)
                 
                 // For punch, we want to rotate around the Y axis to punch forward
-                // We'll keep a bit of the Z rotation for natural arm position
+                // and add some Z rotation to aim upward
                 rightArmLower.rotation.z = baseRotation;
                 
                 // Rotate around Y axis to punch forward toward opponent
-                rightArmLower.rotation.y = directionMultiplier * CONFIG.ANIMATION.punchArmRotation * animCurve;
+                // Increased rotation multiplier to aim higher
+                rightArmLower.rotation.y = directionMultiplier * CONFIG.ANIMATION.punchArmRotation * 1.2 * animCurve;
                 
                 console.log(`Punch arm rotation: ${rightArmLower.rotation.y.toFixed(2)}`);
             } 
             else if (attackType === 'kick') {
-                // Kick animation - lift leg up and extend toward opponent
-                
-                // Calculate the maximum rotation for the kick
-                const maxUpperLegRotation = CONFIG.ANIMATION.kickLegUpperRotation * animCurve;
-                
-                // Upper leg rotation - rotate sideways from the hip (y-axis rotation)
-                rightLegUpper.rotation.y = directionMultiplier * maxUpperLegRotation * 0.2; // Reduced sideways rotation to prevent knee separation
-                
-                // Add z rotation to bend thigh towards opponent
-                rightLegUpper.rotation.z = directionMultiplier * maxUpperLegRotation * 0.6; // Kept the same
-                
-                // Increase x rotation for higher kick (more hip flexion)
-                rightLegUpper.rotation.x = -maxUpperLegRotation * 1.2; // Increased hip flexion
-                
-                // Adjust knee bend for higher kick (more knee extension)
-                rightLegLower.rotation.x = maxUpperLegRotation * 1.5; // Increased knee extension
-                
-                console.log(`Kick leg rotations: upper-y=${rightLegUpper.rotation.y.toFixed(2)}, upper-z=${rightLegUpper.rotation.z.toFixed(2)}, upper-x=${rightLegUpper.rotation.x.toFixed(2)}, lower-x=${rightLegLower.rotation.x.toFixed(2)}`);
+                // --- New Kick Animation (Rewritten) ---
+
+                // Target rotations at the peak of the animation (when animCurve = 1)
+                // These values aim for a forward kick towards the opponent's mid-section.
+                const targetUpperLegX = -Math.PI / 2.5; // Thigh lifted forward (~72 degrees)
+                const targetUpperLegY = directionMultiplier * Math.PI / 12; // Slight outward hip turn (~15 degrees)
+                const targetUpperLegZ = 0; // Minimal hip tilt initially
+                const targetLowerLegX = Math.PI * 0.85; // Knee extension (~153 degrees - mostly straight)
+
+                // Apply rotations based on the animation curve (0 -> 1 -> 0)
+                rightLegUpper.rotation.x = targetUpperLegX * animCurve;
+                rightLegUpper.rotation.y = targetUpperLegY * animCurve;
+                rightLegUpper.rotation.z = targetUpperLegZ * animCurve; // Apply tilt based on curve
+
+                // Knee extension follows the same curve
+                rightLegLower.rotation.x = targetLowerLegX * animCurve;
+
+                console.log(`Kick leg rotations: upper-x=${rightLegUpper.rotation.x.toFixed(2)}, upper-y=${rightLegUpper.rotation.y.toFixed(2)}, upper-z=${rightLegUpper.rotation.z.toFixed(2)}, lower-x=${rightLegLower.rotation.x.toFixed(2)}`);
             }
         }
 
