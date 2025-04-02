@@ -43,10 +43,12 @@
             width: 100%;
             height: 100%;
             background-color: #f00;
-            transform-origin: left center;
+        }
+        #player-health-bar-fill {
+            transform-origin: right center;
         }
         #opponent-health-bar-fill {
-            transform-origin: right center;
+            transform-origin: left center;
         }
     </style>
 </head>
@@ -132,6 +134,9 @@
                 introHoldTime: 3000,
                 introKickSpeed: 0.015,
                 victoryPoseSpeed: 0.01,
+                kickLegUpperRotation: Math.PI / 3,  // Upper leg rotation for kick
+                kickLegLowerRotation: -Math.PI / 2, // Lower leg rotation for kick
+                punchArmRotation: -Math.PI / 2.5    // Arm rotation for punch
             },
             CONFETTI: {
                 count: 50,
@@ -342,14 +347,16 @@
 
             player = createCharacter(CONFIG.CHARACTER.giColor, true);
             player.position.set(CONFIG.ARENA.playerStartX, 0.75, 0);
-            player.userData = { ...initialPlayerState }; // Reset state
+            // Preserve the limb references by merging the initial state into the existing userData
+            Object.assign(player.userData, initialPlayerState);
             scene.add(player);
 
             opponent = createCharacter(CONFIG.CHARACTER.opponentGiColor, false);
             opponent.position.set(CONFIG.ARENA.opponentStartX, 0.75, 0);
-            opponent.userData = { ...initialOpponentState }; // Reset state
-            opponent.userData.nextMoveTime = clock.getElapsedTime() + Math.random() * (CONFIG.AI.moveIntervalMax - CONFIG.AI.moveIntervalMin) + CONFIG.AI.moveIntervalMin;
-            opponent.userData.nextAttackTime = clock.getElapsedTime() + Math.random() * (CONFIG.AI.attackIntervalMax - CONFIG.AI.attackIntervalMin) + CONFIG.AI.attackIntervalMin;
+            // Preserve the limb references by merging the initial state into the existing userData
+            Object.assign(opponent.userData, initialOpponentState);
+            opponent.userData.nextMoveTime = clock.getElapsedTime() + Math.random() * (CONFIG.AI.moveIntervalMax - CONFIG.AI.moveIntervalMin) / 1000 + CONFIG.AI.moveIntervalMin / 1000;
+            opponent.userData.nextAttackTime = clock.getElapsedTime() + Math.random() * (CONFIG.AI.attackIntervalMax - CONFIG.AI.attackIntervalMin) / 1000 + CONFIG.AI.attackIntervalMin / 1000;
             scene.add(opponent);
 
             // Create HTML-based health bars instead of Three.js objects
@@ -454,6 +461,7 @@
             const head = new THREE.Mesh(headGeo, skinMat);
             head.position.y = CONFIG.CHARACTER.bodyHeight + CONFIG.CHARACTER.headRadius * 0.8;
             group.add(head);
+            group.userData.head = head; // Store head reference
 
             // Shoulders
             const shoulderGeo = new THREE.SphereGeometry(CONFIG.CHARACTER.shoulderWidth / 2, 12, 12);
@@ -628,30 +636,19 @@
             // Reset health bar fills to full
             const playerHealthBarFill = document.getElementById('player-health-bar-fill');
             playerHealthBarFill.style.width = '100%';
-            if (playerHealthBarFill.style.transform) {
-                playerHealthBarFill.style.transform = '';
-            }
+            playerHealthBarFill.style.transform = 'scaleX(1)';
 
             const opponentHealthBarFill = document.getElementById('opponent-health-bar-fill');
             opponentHealthBarFill.style.width = '100%';
-            if (opponentHealthBarFill.style.transform) {
-                opponentHealthBarFill.style.transform = '';
-            }
+            opponentHealthBarFill.style.transform = 'scaleX(1)';
         }
 
         function updateHealthBar(isPlayer, currentHealth) {
             const healthBar = isPlayer ? document.getElementById('player-health-bar-fill') : document.getElementById('opponent-health-bar-fill');
             const healthPercentage = Math.max(0, currentHealth / CONFIG.HEALTH.max);
             
-            if (isPlayer) {
-                // Player health bar shrinks from right to left (stays fixed to left edge)
-                healthBar.style.width = `${healthPercentage * 100}%`;
-            } else {
-                // Opponent health bar shrinks from left to right (stays fixed to right edge)
-                healthBar.style.width = `${healthPercentage * 100}%`;
-                // For right-aligned bar, we need to use transform to make it shrink from left to right
-                healthBar.style.transform = `scaleX(${healthPercentage})`;
-            }
+            // For both bars, we'll use transform to scale them properly from the correct edge
+            healthBar.style.transform = `scaleX(${healthPercentage})`;
         }
 
         function createMobileControls() {
@@ -895,9 +892,9 @@
         function handleAttackInput(characterId, attackType) {
             const char = (characterId === 'player') ? player : opponent;
              if (!char || !char.userData) return; // Guard
-            const now = clock.getElapsedTime() * 1000;
+            const now = clock.getElapsedTime();
 
-            if (!char.userData.attacking && gameState === 'gameplay' && (now - char.userData.lastAttackTime > CONFIG.ATTACK.cooldown)) {
+            if (!char.userData.attacking && gameState === 'gameplay' && (now - char.userData.lastAttackTime > CONFIG.ATTACK.cooldown / 1000)) {
                 char.userData.attacking = true;
                 // Use specified attack type if provided, otherwise alternate
                 if (attackType) {
@@ -930,95 +927,120 @@
              // Prevent overlapping opponent *only if opponent exists*
              if (opponent && opponent.position) {
                   const opponentBoundary = opponent.position.x - CONFIG.CHARACTER.bodyRadius * 2; // Where player should stop
-                  player.position.x = Math.min(opponentBoundary, player.position.x);
+                  player.position.x = Math.min(opponent.position.x, player.position.x);
              } else {
-                 // If no opponent yet, use the general right boundary
-                  player.position.x = Math.min(CONFIG.ARENA.boundaryRight, player.position.x);
-             }
-
-
-            // --- Jumping ---
-            const groundY = CONFIG.CHARACTER.legLowerLength / 2; // Base ground position
-            if (player.userData.jumping) {
-                player.position.y += player.userData.velocityY;
-                player.userData.velocityY -= CONFIG.MOVEMENT.gravity;
-
-                if (player.position.y <= groundY) {
-                    player.position.y = groundY;
-                    player.userData.jumping = false;
-                    player.userData.velocityY = 0;
-                }
-            } else {
-                 // Ensure player stays on ground if not jumping
-                 player.position.y = groundY;
+                // If no opponent yet, use the general right boundary
+                 player.position.x = Math.min(CONFIG.ARENA.boundaryRight, player.position.x);
             }
 
-             // --- Attack Timer & Animation Update ---
-             if (player.userData.attacking) {
-                 player.userData.attackTimer -= deltaTime * 1000;
-                 updateAttackAnimation(player, deltaTime); // Update animation progress
-                 if (player.userData.attackTimer <= 0) {
-                     player.userData.attacking = false;
-                     resetLimbs(player);
-                 } else {
-                     // Check hit only if opponent exists
-                      if (opponent) checkAttackHit(player, opponent);
-                 }
-             }
 
-             updateHealthBar(true, player.userData.health);
-             // player.userData.boundingBox.setFromObject(player, true); // Optional for debug
+           // --- Jumping ---
+           const groundY = CONFIG.CHARACTER.legLowerLength / 2; // Base ground position
+           if (player.userData.jumping) {
+               player.position.y += player.userData.velocityY;
+               player.userData.velocityY -= CONFIG.MOVEMENT.gravity;
+
+               if (player.position.y <= groundY) {
+                   player.position.y = groundY;
+                   player.userData.jumping = false;
+                   player.userData.velocityY = 0;
+               }
+           } else {
+                // Ensure player stays on ground if not jumping
+                player.position.y = groundY;
+           }
+
+            // --- Attack Timer & Animation Update ---
+            if (player.userData.attacking) {
+                // Convert deltaTime to milliseconds for the timer
+                player.userData.attackTimer -= deltaTime * 1000;
+                
+                console.log("Player attacking:", player.userData.attackType, 
+                           "Timer:", player.userData.attackTimer.toFixed(0), 
+                           "DeltaTime:", deltaTime.toFixed(3));
+                
+                // Update animation
+                updateAttackAnimation(player, deltaTime);
+                
+                if (player.userData.attackTimer <= 0) {
+                    player.userData.attacking = false;
+                    resetLimbs(player);
+                    console.log("Player attack finished");
+                } else {
+                    // Check hit only if opponent exists
+                    if (opponent) checkAttackHit(player, opponent);
+                }
+            }
+
+            updateHealthBar(true, player.userData.health);
         }
 
         function updateOpponent(deltaTime) {
-             if (!opponent || !opponent.userData || gameState !== 'gameplay') return;
-             const now = clock.getElapsedTime();
-             const groundY = CONFIG.CHARACTER.legLowerLength / 2;
+            if (!opponent || !opponent.userData || gameState !== 'gameplay') return;
+            const now = clock.getElapsedTime();
+            const groundY = CONFIG.CHARACTER.legLowerLength / 2;
 
             // Ensure opponent stays on ground (no AI jump implemented)
             opponent.position.y = groundY;
 
-            // --- AI Movement ---
+            // --- AI Movement Logic ---
             if (now > opponent.userData.nextMoveTime && !opponent.userData.attacking) {
-                opponent.userData.moveDirection = (Math.random() > 0.5) ? 1 : -1;
-                 opponent.userData.nextMoveTime = now + (Math.random() * (CONFIG.AI.moveIntervalMax - CONFIG.AI.moveIntervalMin) + CONFIG.AI.moveIntervalMin) / 1000;
-             }
-
-             // Move only if not attacking, timer allows, and player exists
-             if (!opponent.userData.attacking && now < opponent.userData.nextMoveTime && player && player.position) {
-                  const moveSpeed = CONFIG.MOVEMENT.speed * 0.8;
-                  opponent.position.x += opponent.userData.moveDirection * moveSpeed;
-
-                  // Clamp position
-                  opponent.position.x = Math.min(CONFIG.ARENA.boundaryRight, opponent.position.x);
-                  const playerBoundary = player.position.x + CONFIG.CHARACTER.bodyRadius * 2;
-                  opponent.position.x = Math.max(playerBoundary, opponent.position.x);
-             }
-
-            // --- AI Attack ---
-            if (now > opponent.userData.nextAttackTime && !opponent.userData.attacking) {
-                // Attack only if player exists and AI decides to
-                if (player && Math.random() < CONFIG.AI.attackProbability) {
-                    handleAttackInput('opponent');
-                }
-                opponent.userData.nextAttackTime = now + (Math.random() * (CONFIG.AI.attackIntervalMax - CONFIG.AI.attackIntervalMin) + CONFIG.AI.attackIntervalMin) / 1000;
+                // Decide on a new random move
+                opponent.userData.nextMoveTime = now + Math.random() * (CONFIG.AI.moveIntervalMax - CONFIG.AI.moveIntervalMin) / 1000 + CONFIG.AI.moveIntervalMin / 1000;
+                opponent.userData.moveDirection = (Math.random() < 0.5) ? -1 : 1; // -1 = left, 1 = right
             }
 
-             // --- Attack Timer & Animation Update ---
-             if (opponent.userData.attacking) {
-                 opponent.userData.attackTimer -= deltaTime * 1000;
-                 updateAttackAnimation(opponent, deltaTime);
-                 if (opponent.userData.attackTimer <= 0) {
-                     opponent.userData.attacking = false;
-                     resetLimbs(opponent);
-                 } else {
-                     // Check hit only if player exists
-                      if (player) checkAttackHit(opponent, player);
-                 }
-             }
+            // Move opponent according to current direction
+            if (!opponent.userData.attacking && now < opponent.userData.nextMoveTime && player && player.position) {
+                // Move toward player with some randomness
+                const moveDirection = (opponent.position.x > player.position.x) ? -1 : 1;
+                opponent.position.x += moveDirection * CONFIG.MOVEMENT.speed * 0.5; // Slower than player
+                
+                // Clamp position within boundaries
+                opponent.position.x = Math.max(CONFIG.ARENA.boundaryLeft, opponent.position.x);
+                opponent.position.x = Math.min(CONFIG.ARENA.boundaryRight, opponent.position.x);
+                
+                // Prevent overlapping player
+                const playerBoundary = player.position.x + CONFIG.CHARACTER.bodyRadius * 2;
+                if (moveDirection > 0) { // Moving right
+                    opponent.position.x = Math.min(opponent.position.x, playerBoundary);
+                }
+            }
 
-             updateHealthBar(false, opponent.userData.health);
-             // opponent.userData.boundingBox.setFromObject(opponent, true); // Optional for debug
+            // --- AI Attack Logic ---
+            if (now > opponent.userData.nextAttackTime && !opponent.userData.attacking) {
+                // Decide whether to attack
+                if (Math.random() < CONFIG.AI.attackProbability && player && player.position) {
+                    // Check if player is in range
+                    const distance = Math.abs(opponent.position.x - player.position.x);
+                    if (distance < CONFIG.ATTACK.hitDistance * 1.2) { // Give AI slightly more range
+                        handleAttackInput('opponent');
+                    }
+                }
+                // Set next attack time regardless of whether we attacked
+                opponent.userData.nextAttackTime = now + Math.random() * (CONFIG.AI.attackIntervalMax - CONFIG.AI.attackIntervalMin) / 1000 + CONFIG.AI.attackIntervalMin / 1000;
+            }
+
+            // --- Attack Timer & Animation Update ---
+            if (opponent.userData.attacking) {
+                opponent.userData.attackTimer -= deltaTime * 1000;
+                console.log("Opponent attacking:", opponent.userData.attackType, 
+                           "Timer:", opponent.userData.attackTimer.toFixed(0), 
+                           "DeltaTime:", deltaTime.toFixed(3));
+                
+                updateAttackAnimation(opponent, deltaTime);
+                
+                if (opponent.userData.attackTimer <= 0) {
+                    opponent.userData.attacking = false;
+                    resetLimbs(opponent);
+                    console.log("Opponent attack finished");
+                } else {
+                    // Check hit only if player exists
+                    if (player) checkAttackHit(opponent, player);
+                }
+            }
+
+            updateHealthBar(false, opponent.userData.health);
         }
 
 
@@ -1053,93 +1075,131 @@
                      }
                  }
              }
-         }
+        }
 
         // --- Animations (Ensure check for character existence) ---
          function animateAttack(character, type) {
-              if (!character || !character.userData) return;
-              resetLimbs(character);
-              character.userData.hitThisAttack = false;
+            if (!character || !character.userData) return;
+            
+            // Reset limbs to starting position
+            resetLimbs(character);
+            
+            // Set attack parameters
+            character.userData.hitThisAttack = false;
+            character.userData.attackType = type;
+            
+            console.log("Starting attack animation:", type, "- Setting up animation data");
+        }
 
-              const armUpper = character.userData.rightArmUpper;
-              const armLower = character.userData.rightArmLower;
-              const legUpper = character.userData.rightLegUpper;
-              const legLower = character.userData.rightLegLower;
-              const duration = (type === 'punch' ? CONFIG.ATTACK.punchDuration : CONFIG.ATTACK.kickDuration) / 1000;
+        function updateAttackAnimation(character, deltaTime) {
+            if (!character || !character.userData || !character.userData.attacking) {
+                return;
+            }
 
-              if (!armUpper || !armLower || !legUpper || !legLower) return; // Guard if limbs somehow missing
+            // Get the limbs we need to animate
+            const rightArmLower = character.userData.rightArmLower;
+            const rightLegUpper = character.userData.rightLegUpper;
+            const rightLegLower = character.userData.rightLegLower;
+            
+            if (!rightArmLower || !rightLegUpper || !rightLegLower) {
+                console.error("Missing limbs for animation:", 
+                    !rightArmLower ? "rightArmLower" : "", 
+                    !rightLegUpper ? "rightLegUpper" : "", 
+                    !rightLegLower ? "rightLegLower" : "");
+                return;
+            }
 
-              const targetRotationAxis = (type === 'punch') ? 'z' : 'x';
-              const targetRotationValue = (type === 'punch') ? -Math.PI / 2.5 : -Math.PI / 3; // Adjusted angles
-              const limbToAnimate = (type === 'punch') ? armLower : legLower;
+            // Calculate animation progress (0 to 1)
+            const attackType = character.userData.attackType;
+            const attackDuration = (attackType === 'punch') ? 
+                CONFIG.ATTACK.punchDuration : CONFIG.ATTACK.kickDuration;
+            
+            // Progress goes from 0 to 1 as the timer counts down
+            const progress = 1 - (character.userData.attackTimer / attackDuration);
+            
+            // Animation curve: 0 -> 1 -> 0 (out and back)
+            // sin(π × progress) gives us a smooth curve
+            const animCurve = Math.sin(Math.PI * progress);
+            
+            console.log(`${attackType} animation: progress=${progress.toFixed(2)}, curve=${animCurve.toFixed(2)}, timer=${character.userData.attackTimer.toFixed(0)}`);
+            
+            if (attackType === 'punch') {
+                // Punch animation - extend arm
+                const baseRotation = -Math.PI / 6; // Starting rotation
+                const targetRotation = CONFIG.ANIMATION.punchArmRotation;
+                const currentRotation = baseRotation + (targetRotation - baseRotation) * animCurve;
+                
+                // Apply rotation to arm
+                rightArmLower.rotation.z = currentRotation;
+                console.log(`Punch arm rotation: ${currentRotation.toFixed(2)}`);
+            } 
+            else if (attackType === 'kick') {
+                // Kick animation - move leg
+                // Upper leg rotation
+                const upperLegRotation = CONFIG.ANIMATION.kickLegUpperRotation * animCurve;
+                rightLegUpper.rotation.x = upperLegRotation;
+                
+                // Lower leg rotation
+                const lowerLegRotation = CONFIG.ANIMATION.kickLegLowerRotation * animCurve;
+                rightLegLower.rotation.x = lowerLegRotation;
+                
+                console.log(`Kick leg rotations: upper=${upperLegRotation.toFixed(2)}, lower=${lowerLegRotation.toFixed(2)}`);
+            }
+        }
 
-              limbToAnimate.userData.targetRotation = targetRotationValue;
-              limbToAnimate.userData.targetAxis = targetRotationAxis;
-              limbToAnimate.userData.animDuration = duration;
-              limbToAnimate.userData.animProgress = 0;
-          }
+        function animateLimb(limb, deltaTime, baseRotation) {
+            if (!limb || !limb.userData || limb.userData.animProgress === undefined) return;
+            
+            const progressIncrement = deltaTime / limb.userData.animDuration;
+            limb.userData.animProgress += progressIncrement;
+            let currentProgress = Math.min(limb.userData.animProgress, 1.0); // Clamp
+            
+            // Create a smooth animation curve: accelerate out, then back
+            let rotationProgress = (currentProgress < 0.5) ? 
+                (currentProgress * 2) : ((1.0 - currentProgress) * 2);
+            
+            // Apply rotation based on the target axis
+            if (limb.userData.targetAxis === 'z') {
+                limb.rotation.z = THREE.MathUtils.lerp(baseRotation, limb.userData.targetRotation, rotationProgress);
+                limb.rotation.x = 0; // Ensure X is reset
+            } else { // 'x' axis
+                limb.rotation.x = THREE.MathUtils.lerp(baseRotation, limb.userData.targetRotation, rotationProgress);
+                // Don't reset Z for legs as they might have a base Z rotation
+            }
+            
+            // Clean up when animation completes
+            if (limb.userData.animProgress >= 1.0) {
+                delete limb.userData.animProgress;
+                delete limb.userData.animDuration;
+                delete limb.userData.targetRotation;
+                delete limb.userData.targetAxis;
+            }
+        }
 
-          function updateAttackAnimation(character, deltaTime) {
-             if (!character || !character.userData || !character.userData.attacking) return;
+        function resetLimbs(character) {
+            if (!character || !character.userData) return;
+            const leftArmUpper = character.userData.leftArmUpper;
+            const rightArmUpper = character.userData.rightArmUpper;
+            const leftArmLower = character.userData.leftArmLower;
+            const rightArmLower = character.userData.rightArmLower;
+            const leftLegUpper = character.userData.leftLegUpper;
+            const rightLegUpper = character.userData.rightLegUpper;
+            const leftLegLower = character.userData.leftLegLower;
+            const rightLegLower = character.userData.rightLegLower;
 
-             const armUpper = character.userData.rightArmUpper;
-             const armLower = character.userData.rightArmLower;
-             const legUpper = character.userData.rightLegUpper;
-             const legLower = character.userData.rightLegLower;
-             if (!armUpper || !armLower || !legUpper || !legLower) return; // Guard
+            if(leftArmUpper) leftArmUpper.rotation.set(0, 0, Math.PI / 6);
+            if(rightArmUpper) rightArmUpper.rotation.set(0, 0, -Math.PI / 6);
+            if(leftArmLower) leftArmLower.rotation.set(0, 0, Math.PI / 6);
+            if(rightArmLower) rightArmLower.rotation.set(0, 0, -Math.PI / 6);
+            if(leftLegUpper) leftLegUpper.rotation.set(0, 0, 0);
+            if(rightLegUpper) rightLegUpper.rotation.set(0, 0, 0);
+            if(leftLegLower) leftLegLower.rotation.set(0, 0, 0);
+            if(rightLegLower) rightLegLower.rotation.set(0, 0, 0);
 
-             const limbToAnimate = (character.userData.attackType === 'punch') ? armLower : legLower;
-
-             if (limbToAnimate.userData.animProgress !== undefined) {
-                 const progressIncrement = deltaTime / limbToAnimate.userData.animDuration;
-                 limbToAnimate.userData.animProgress += progressIncrement;
-                 let currentProgress = Math.min(limbToAnimate.userData.animProgress, 1.0); // Clamp
-
-                 let rotationProgress = (currentProgress < 0.5) ? (currentProgress * 2) : ((1.0 - currentProgress) * 2);
-
-                 const baseRotationZ_Arm = -Math.PI / 6; // Base arm rotation Z
-
-                 if (limbToAnimate === armLower) {
-                      limbToAnimate.rotation.z = THREE.MathUtils.lerp(baseRotationZ_Arm, limbToAnimate.userData.targetRotation, rotationProgress);
-                      limbToAnimate.rotation.x = 0; // Ensure X is reset
-                 } else { // Leg
-                      limbToAnimate.rotation.x = THREE.MathUtils.lerp(0, limbToAnimate.userData.targetRotation, rotationProgress);
-                      limbToAnimate.rotation.z = 0; // Ensure Z is reset
-                 }
-
-                 if (limbToAnimate.userData.animProgress >= 1.0) {
-                     delete limbToAnimate.userData.animProgress;
-                     delete limbToAnimate.userData.animDuration;
-                     delete limbToAnimate.userData.targetRotation;
-                     delete limbToAnimate.userData.targetAxis;
-                 }
-             }
-          }
-
-          function resetLimbs(character) {
-             if (!character || !character.userData) return;
-             const leftArmUpper = character.userData.leftArmUpper;
-             const rightArmUpper = character.userData.rightArmUpper;
-             const leftArmLower = character.userData.leftArmLower;
-             const rightArmLower = character.userData.rightArmLower;
-             const leftLegUpper = character.userData.leftLegUpper;
-             const rightLegUpper = character.userData.rightLegUpper;
-             const leftLegLower = character.userData.leftLegLower;
-             const rightLegLower = character.userData.rightLegLower;
-
-             if(leftArmUpper) leftArmUpper.rotation.set(0, 0, Math.PI / 6);
-             if(rightArmUpper) rightArmUpper.rotation.set(0, 0, -Math.PI / 6);
-             if(leftArmLower) leftArmLower.rotation.set(0, 0, Math.PI / 6);
-             if(rightArmLower) rightArmLower.rotation.set(0, 0, -Math.PI / 6);
-             if(leftLegUpper) leftLegUpper.rotation.set(0, 0, 0);
-             if(rightLegUpper) rightLegUpper.rotation.set(0, 0, 0);
-             if(leftLegLower) leftLegLower.rotation.set(0, 0, 0);
-             if(rightLegLower) rightLegLower.rotation.set(0, 0, 0);
-
-             if(rightArmLower && rightArmLower.userData) { delete rightArmLower.userData.animProgress; delete rightArmLower.userData.targetRotation; }
-             if(rightLegLower && rightLegLower.userData) { delete rightLegLower.userData.animProgress; delete rightLegLower.userData.targetRotation; }
-             if(character.userData) delete character.userData.hitThisAttack;
-         }
+            if(rightArmLower && rightArmLower.userData) { delete rightArmLower.userData.animProgress; delete rightArmLower.userData.targetRotation; }
+            if(rightLegLower && rightLegLower.userData) { delete rightLegLower.userData.animProgress; delete rightLegLower.userData.targetRotation; }
+            if(character.userData) delete character.userData.hitThisAttack;
+        }
 
         function updateIntroAnimation(deltaTime) {
             const now = clock.getElapsedTime();
