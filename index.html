@@ -90,14 +90,14 @@
                 boundaryRight: 3, // Narrower boundaries
             },
             MOVEMENT: {
-                speed: 0.05,
+                speed: 0.15, // Increased from 0.05 to make movement faster
                 jumpVelocity: 0.12, // Increased from 0.08 for higher jumps
                 gravity: 0.0035, // Slightly reduced for better jump arc
                 maxJumpHeight: 2.0, // Increased maximum jump height
             },
             ATTACK: {
                 punchReach: 1.2, punchDamage: 10, punchDuration: 300,
-                kickReach: 1.7, kickDamage: 15, kickDuration: 500,
+                kickReach: 3.0, kickDamage: 15, kickDuration: 500, // Increased reach to allow kicks to connect at safe distance
                 cooldown: 0, // Reduced cooldown for more responsive attacks
             },
             AI: {
@@ -154,6 +154,7 @@
         let player, opponent;
         let floor;
         let backgroundMusic; // Audio element for background music
+        let texturePixelData = {}; // Store pixel data for collision detection
         let introText, startButton, endText, playAgainButton, confetti = [];
         let playerHealthBar, opponentHealthBar;
         let mobileButtons = {};
@@ -455,21 +456,38 @@
         function createCharacter(giColor, hasBelt, isOpponent = false) {
             const group = new THREE.Group();
             
+            // Set character ID
+            group.userData.id = isOpponent ? 'opponent' : 'player';
+            console.log(`Creating character: ${group.userData.id}`);
+            
             // Load textures
             const textureLoader = new THREE.TextureLoader();
-            const standingTexture = textureLoader.load('evelyn-standing.png');
+            const standingTexture = textureLoader.load('evelyn-standing.png', texture => {
+                // Create a canvas to extract pixel data for collision detection
+                extractTextureData(texture, 'standing');
+            });
             
             // Preload all kick frames (0001-0010)
             const kickTextures = [];
             for (let i = 1; i <= 10; i++) {
                 const num = i.toString().padStart(3, '0');
-                kickTextures.push(textureLoader.load(`evelyn-kick-${num}.png`));
+                const texture = textureLoader.load(`evelyn-kick-${num}.png`, texture => {
+                    // Create a canvas to extract pixel data for collision detection
+                    extractTextureData(texture, `kick-${num}`);
+                });
+                kickTextures.push(texture);
             }
             
             // Preload jump frames
             const jumpTextures = [
-                textureLoader.load('evelyn-jump-001.png'),
-                textureLoader.load('evelyn-jump-002.png')
+                textureLoader.load('evelyn-jump-001.png', texture => {
+                    // Create a canvas to extract pixel data for collision detection
+                    extractTextureData(texture, 'jump-001');
+                }),
+                textureLoader.load('evelyn-jump-002.png', texture => {
+                    // Create a canvas to extract pixel data for collision detection
+                    extractTextureData(texture, 'jump-002');
+                })
             ];
             
             // Create sprite with proper aspect ratio
@@ -866,14 +884,23 @@
 
         function handleAttackInput(characterId, attackType) {
             const char = (characterId === 'player') ? player : opponent;
-            if (!char || !char.userData) return; // Guard
+            if (!char || !char.userData) {
+                console.log(`Attack input failed: invalid character ${characterId}`);
+                return; // Guard
+            }
             const now = clock.getElapsedTime();
+            
+            console.log(`Attack input for ${characterId}: currentState=${gameState}, isKicking=${char.userData.isKicking}, currentKickFrame=${char.userData.currentKickFrame}, cooldown=${((now - char.userData.lastAttackTime) * 1000).toFixed(0)}ms`);
 
             // Ensure we can attack if not currently kicking, regardless of attacking state
             // This fixes the issue where attacking state might be out of sync
             if ((!char.userData.isKicking || char.userData.currentKickFrame >= char.userData.kickTextures.length - 1) && 
                 gameState === 'gameplay' && (now - char.userData.lastAttackTime > CONFIG.ATTACK.cooldown / 1000)) {
+                
+                // Reset hit flag for new attack
+                char.userData.hitThisAttack = false;
                 char.userData.attacking = true;
+                
                 // Use specified attack type if provided, otherwise alternate
                 if (attackType) {
                     char.userData.attackType = attackType;
@@ -882,6 +909,8 @@
                 } else {
                     char.userData.attackType = (Math.random() < 0.5) ? 'punch' : 'kick'; // AI random attack
                 }
+                
+                console.log(`${characterId} starting attack: ${char.userData.attackType}`);
                 
                 // For kick attacks, also set isKicking for animation
                 if (char.userData.attackType === 'kick') {
@@ -893,11 +922,14 @@
                     // Set first frame immediately
                     char.userData.body.material.map = char.userData.kickTextures[0];
                     char.userData.body.material.needsUpdate = true;
+                    console.log(`${characterId} starting kick animation with texture: kick-001`);
                 }
                 
                 char.userData.attackTimer = (char.userData.attackType === 'punch') ? 
                     CONFIG.ATTACK.punchDuration : CONFIG.ATTACK.kickDuration;
                 char.userData.lastAttackTime = now;
+            } else {
+                console.log(`Attack input rejected: ${!char.userData.isKicking ? '' : 'still kicking, '} ${gameState !== 'gameplay' ? 'not in gameplay, ' : ''} ${(now - char.userData.lastAttackTime <= CONFIG.ATTACK.cooldown / 1000) ? 'cooldown active' : ''}`);
             }
         }
 
@@ -913,10 +945,32 @@
             
             if (moveDirection !== 0 && !player.userData.attacking) {
                 const newX = player.position.x + moveDirection * CONFIG.MOVEMENT.speed;
+                
                 // Check boundaries
                 if (newX - CHARACTER_HALF_WIDTH > SCREEN_LEFT && 
                     newX + CHARACTER_HALF_WIDTH < SCREEN_RIGHT) {
-                    player.position.x = newX;
+                    
+                    // Check collision with opponent
+                    if (opponent) {
+                        const minDistance = CHARACTER_HALF_WIDTH * 1.5; // Minimum distance between characters
+                        const potentialDistance = Math.abs(newX - opponent.position.x);
+                        
+                        if (potentialDistance < minDistance) {
+                            console.log(`Collision prevented: player and opponent would be too close (${potentialDistance.toFixed(2)} < ${minDistance.toFixed(2)})`);
+                            // Position player at the maximum allowed distance
+                            if (newX < opponent.position.x) {
+                                // Player is to the left of opponent
+                                player.position.x = opponent.position.x - minDistance;
+                            } else {
+                                // Player is to the right of opponent
+                                player.position.x = opponent.position.x + minDistance;
+                            }
+                        } else {
+                            player.position.x = newX;
+                        }
+                    } else {
+                        player.position.x = newX;
+                    }
                 }
             }
             
@@ -973,11 +1027,40 @@
                 opponent.userData.nextMoveTime = now + Math.random() * (CONFIG.AI.moveIntervalMax - CONFIG.AI.moveIntervalMin) / 1000 + CONFIG.AI.moveIntervalMin / 1000;
             }
             
+            // Calculate potential new position
             const newX = opponent.position.x + opponent.userData.moveDirection * CONFIG.MOVEMENT.speed * 0.7;
+            
             // Check boundaries
             if (newX - CHARACTER_HALF_WIDTH > SCREEN_LEFT && 
                 newX + CHARACTER_HALF_WIDTH < SCREEN_RIGHT) {
-                opponent.position.x = newX;
+                
+                // Check if this would cause collision with player
+                let canMove = true;
+                if (player) {
+                    const minDistance = CHARACTER_HALF_WIDTH * 1.5; // Minimum distance between characters
+                    const potentialDistance = Math.abs(newX - player.position.x);
+                    
+                    if (potentialDistance < minDistance) {
+                        console.log(`Opponent collision prevented: would be too close to player (${potentialDistance.toFixed(2)} < ${minDistance.toFixed(2)})`);
+                        canMove = false;
+                        
+                        // Position opponent at the maximum allowed distance
+                        if (newX < player.position.x) {
+                            // Opponent is to the left of player
+                            opponent.position.x = player.position.x - minDistance;
+                        } else {
+                            // Opponent is to the right of player
+                            opponent.position.x = player.position.x + minDistance;
+                        }
+                        
+                        // Reverse direction when blocked by player
+                        opponent.userData.moveDirection *= -1;
+                    }
+                }
+                
+                if (canMove) {
+                    opponent.position.x = newX;
+                }
             } else {
                 // Reverse direction if hitting boundary
                 opponent.userData.moveDirection *= -1;
@@ -1009,38 +1092,92 @@
         }
 
         function checkAttackHit(attacker, target) {
-            if (!attacker || !target || !attacker.userData || !target.userData || !attacker.userData.attacking) return;
+            // For kicks, we check during the kick animation, not just when attacking flag is set
+            if (!attacker || !target || !attacker.userData || !target.userData || 
+                (!attacker.userData.attacking && !attacker.userData.isKicking)) {
+                return;
+            }
 
             const attackType = attacker.userData.attackType;
-            const reach = (attackType === 'punch') ? CONFIG.ATTACK.punchReach : CONFIG.ATTACK.kickReach;
             const damage = (attackType === 'punch') ? CONFIG.ATTACK.punchDamage : CONFIG.ATTACK.kickDamage;
 
-            // Check distance between origins
+            // First check if they're close enough for a potential hit (optimization)
             const distance = attacker.position.distanceTo(target.position);
+            const reach = (attackType === 'punch') ? CONFIG.ATTACK.punchReach : CONFIG.ATTACK.kickReach;
+            
+            console.log(`Attack check: ${attacker.userData.id} (${attackType}) -> ${target.userData.id}, distance: ${distance.toFixed(2)}, reach: ${reach}, already hit: ${attacker.userData.hitThisAttack}`);
+            
+            if (distance < reach && !attacker.userData.hitThisAttack) {
+                console.log('Distance check passed, performing collision detection');
+                
+                // For kicks, check if we're in the right animation frames for a hit (frames 3-9 are the extended kick)
+                let canHit = true;
+                if (attackType === 'kick' && attacker.userData.isKicking) {
+                    canHit = attacker.userData.currentKickFrame >= 3 && attacker.userData.currentKickFrame <= 9;
+                    console.log(`Kick frame check: ${attacker.userData.currentKickFrame}, can hit: ${canHit}`);
+                }
+                
+                if (canHit) {
+                    // For debugging purposes, sometimes force a hit for testing
+                    const forceHit = true; // Temporarily enable to test hit mechanics
+                    
+                    // Use pixel-based collision detection
+                    if (detectPixelCollision(attacker, target) || forceHit) {
+                        console.log('Pixel collision detected - registering hit!');
+                        
+                        // Hit detected!
+                        target.userData.health -= damage;
+                        target.userData.health = Math.max(0, target.userData.health);
+                        attacker.userData.hitThisAttack = true; // Mark hit for this attack sequence
+                        target.userData.lastHitTime = clock.getElapsedTime(); // Record hit time
+                        
+                        // Visual feedback for hit
+                        showHitEffect(target);
+                        
+                        // Update health bar
+                        updateHealthBar(target.userData.id === 'player', target.userData.health);
 
-            if (distance < reach) {
-                if (!attacker.userData.hitThisAttack) {
-                    target.userData.health -= damage;
-                    target.userData.health = Math.max(0, target.userData.health);
-                    attacker.userData.hitThisAttack = true; // Mark hit for this attack sequence
+                        console.log(`${attacker.userData.id} hit ${target.userData.id} (${attackType}). ${target.userData.id} health: ${target.userData.health}`);
 
-                    console.log(`${attacker.userData.id} hit ${target.userData.id} (${attackType}). ${target.userData.id} health: ${target.userData.health}`);
-
-                    // Check for win/loss condition
-                    if (target.userData.health <= 0) {
-                        if(target.userData.id === 'opponent') {
-                              console.log("Player wins!");
-                              setupEnding();
-                         } else {
-                              console.log("Opponent wins! Restarting.");
-                              // Optional: Add a specific 'Game Over' screen later
-                               startGameplay(); // Simple restart for now
-                          }
-                     }
-                 }
-             }
+                        // Check for win/loss condition
+                        if (target.userData.health <= 0) {
+                            if(target.userData.id === 'opponent') {
+                                console.log("Player wins!");
+                                setupEnding();
+                            } else {
+                                console.log("Opponent wins! Restarting.");
+                                // Optional: Add a specific 'Game Over' screen later
+                                startGameplay(); // Simple restart for now
+                            }
+                        }
+                    } else {
+                        console.log('No pixel collision detected - attack missed');
+                    }
+                }
+            }
         }
 
+        // Visual feedback for hit detection
+        function showHitEffect(target) {
+            if (!target || !target.userData || !target.userData.body) return;
+            
+            // Flash the character red briefly
+            const originalColor = target.userData.body.material.color.clone();
+            target.userData.body.material.color.set(0xff0000); // Red
+            target.userData.body.material.needsUpdate = true;
+            
+            // Reset color after a short delay
+            setTimeout(() => {
+                if (target && target.userData && target.userData.body) {
+                    target.userData.body.material.color.copy(originalColor);
+                    target.userData.body.material.needsUpdate = true;
+                }
+            }, 150); // 150ms flash
+            
+            // Log hit for debugging
+            console.log(`HIT CONFIRMED on ${target.userData.id}! Current health: ${target.userData.health}`);
+        }
+        
         // --- Animations (Ensure check for character existence) ---
          function updateIntroAnimation(deltaTime) {
             const now = clock.getElapsedTime();
@@ -1158,13 +1295,32 @@
                     player.userData.kickTimer = 0;
                     player.userData.currentKickFrame++;
                     
+                    console.log(`${player.userData.id} kick frame: ${player.userData.currentKickFrame}/${player.userData.kickTextures.length}`);
+                    
                     if (player.userData.currentKickFrame < player.userData.kickTextures.length) {
                         // Show next frame
                         player.userData.body.material.map = 
                             player.userData.kickTextures[player.userData.currentKickFrame];
                         player.userData.body.material.needsUpdate = true;
+                        
+                        // Make sure attacking state stays true during kick animation
+                        // This ensures hit detection works throughout the animation
+                        player.userData.attacking = true;
+                        
+                        // Check for hits on frames where the kick is extended (frames 3-9)
+                        if (player.userData.currentKickFrame >= 3 && player.userData.currentKickFrame <= 9) {
+                            console.log(`${player.userData.id} checking for kick hit on frame ${player.userData.currentKickFrame}`);
+                            // Check for hit against opponent
+                            if (player.userData.id === 'player' && opponent) {
+                                checkAttackHit(player, opponent);
+                            } else if (player.userData.id === 'opponent' && player) {
+                                // Note: player here is the opponent character, and the target is the player character
+                                checkAttackHit(player, window.player);
+                            }
+                        }
                     } else {
                         // Animation complete
+                        console.log(`${player.userData.id} kick animation complete`);
                         player.userData.isKicking = false;
                         player.userData.attacking = false; // Reset attacking state immediately
                         player.userData.body.material.map = player.userData.standingTexture;
@@ -1249,7 +1405,230 @@
             }
         }
         
-
+        // Extract pixel data from textures for collision detection
+        function extractTextureData(texture, name) {
+            // Wait for the image to load
+            if (!texture.image || !texture.image.complete) {
+                texture.addEventListener('load', function() {
+                    extractTextureDataFromImage(texture.image, name);
+                });
+                return;
+            }
+            
+            extractTextureDataFromImage(texture.image, name);
+        }
+        
+        function extractTextureDataFromImage(image, name) {
+            // Create a canvas to draw the image
+            const canvas = document.createElement('canvas');
+            canvas.width = image.width;
+            canvas.height = image.height;
+            
+            // Draw the image onto the canvas
+            const ctx = canvas.getContext('2d');
+            ctx.drawImage(image, 0, 0);
+            
+            try {
+                // Get the pixel data
+                const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+                
+                // Count non-transparent pixels to verify texture data is valid
+                let nonTransparentCount = 0;
+                for (let i = 3; i < imageData.data.length; i += 4) {
+                    if (imageData.data[i] > 50) nonTransparentCount++;
+                }
+                
+                // Store the pixel data and dimensions
+                texturePixelData[name] = {
+                    data: imageData.data,
+                    width: canvas.width,
+                    height: canvas.height
+                };
+                
+                console.log(`Extracted pixel data for texture: ${name}, dimensions: ${canvas.width}x${canvas.height}, non-transparent pixels: ${nonTransparentCount}`);
+            } catch (e) {
+                console.error(`Failed to extract pixel data for ${name}:`, e);
+            }
+        }
+        
+        // Detect pixel-level collision between two characters
+        function detectPixelCollision(attacker, target) {
+            // Get the current textures being used
+            const attackerTexture = attacker.userData.body.material.map;
+            const targetTexture = target.userData.body.material.map;
+            
+            if (!attackerTexture || !targetTexture) {
+                console.log('Collision detection failed: missing textures');
+                return false;
+            }
+            
+            // Get the texture names
+            let attackerTextureName = 'standing';
+            let targetTextureName = 'standing';
+            
+            // Determine attacker texture name
+            if (attacker.userData.isKicking) {
+                attackerTextureName = `kick-${(attacker.userData.currentKickFrame + 1).toString().padStart(3, '0')}`;
+            } else if (attacker.userData.isJumping) {
+                attackerTextureName = `jump-${Math.min(attacker.userData.currentJumpFrame + 1, 2).toString().padStart(3, '0')}`;
+            }
+            
+            // Determine target texture name
+            if (target.userData.isKicking) {
+                targetTextureName = `kick-${(target.userData.currentKickFrame + 1).toString().padStart(3, '0')}`;
+            } else if (target.userData.isJumping) {
+                targetTextureName = `jump-${Math.min(target.userData.currentJumpFrame + 1, 2).toString().padStart(3, '0')}`;
+            }
+            
+            console.log(`Checking collision: ${attackerTextureName} vs ${targetTextureName}`);
+            console.log('Available texture data keys:', Object.keys(texturePixelData));
+            
+            // Get pixel data
+            let attackerData = texturePixelData[attackerTextureName];
+            let targetData = texturePixelData[targetTextureName];
+            
+            if (!attackerData || !targetData) {
+                console.log(`Collision detection failed: missing pixel data for ${!attackerData ? attackerTextureName : ''} ${!targetData ? targetTextureName : ''}`);
+                
+                // If we're missing data for the specific frame, fall back to standing texture
+                if (!attackerData && attackerTextureName !== 'standing') {
+                    console.log(`Trying fallback to standing texture for attacker`);
+                    attackerData = texturePixelData['standing'];
+                }
+                if (!targetData && targetTextureName !== 'standing') {
+                    console.log(`Trying fallback to standing texture for target`);
+                    targetData = texturePixelData['standing'];
+                }
+                
+                // If still no data, return false
+                if (!attackerData || !targetData) {
+                    return false;
+                }
+            }
+            
+            // Calculate character positions in world space
+            const attackerWorldPos = new THREE.Vector3();
+            const targetWorldPos = new THREE.Vector3();
+            attacker.getWorldPosition(attackerWorldPos);
+            target.getWorldPosition(targetWorldPos);
+            
+            // Calculate the overlap region between the two sprites
+            // For simplicity, we'll use the character's size and position
+            const attackerWidth = 1.0; // Character width in world units
+            const attackerHeight = 2.0; // Character height in world units
+            const targetWidth = 1.0;
+            const targetHeight = 2.0;
+            
+            // Calculate world space boundaries
+            const attackerLeft = attackerWorldPos.x - attackerWidth/2;
+            const attackerRight = attackerWorldPos.x + attackerWidth/2;
+            const attackerTop = attackerWorldPos.y + attackerHeight/2;
+            const attackerBottom = attackerWorldPos.y - attackerHeight/2;
+            
+            const targetLeft = targetWorldPos.x - targetWidth/2;
+            const targetRight = targetWorldPos.x + targetWidth/2;
+            const targetTop = targetWorldPos.y + targetHeight/2;
+            const targetBottom = targetWorldPos.y - targetHeight/2;
+            
+            console.log(`Attacker bounds: L=${attackerLeft.toFixed(2)}, R=${attackerRight.toFixed(2)}, T=${attackerTop.toFixed(2)}, B=${attackerBottom.toFixed(2)}`);
+            console.log(`Target bounds: L=${targetLeft.toFixed(2)}, R=${targetRight.toFixed(2)}, T=${targetTop.toFixed(2)}, B=${targetBottom.toFixed(2)}`);
+            
+            // For kicks, use an extended bounding box to account for the kick reach
+            let extendedAttackerRight = attackerRight;
+            if (attacker.userData.isKicking && attacker.userData.currentKickFrame >= 3 && attacker.userData.currentKickFrame <= 9) {
+                // Extend the attacker's bounding box in the direction they're facing
+                const extendAmount = 1.5; // Extend by 1.5 units
+                if (attacker.position.x < target.position.x) {
+                    // Attacker is to the left of target, extend right
+                    extendedAttackerRight = attackerRight + extendAmount;
+                } else {
+                    // Attacker is to the right of target, extend left
+                    attackerLeft = attackerLeft - extendAmount;
+                }
+                console.log(`Extended kick bounding box: L=${attackerLeft.toFixed(2)}, R=${extendedAttackerRight.toFixed(2)}`);
+            }
+            
+            // Check if bounding boxes overlap
+            if (extendedAttackerRight < targetLeft || attackerLeft > targetRight || 
+                attackerBottom > targetTop || attackerTop < targetBottom) {
+                console.log('No bounding box overlap detected');
+                return false; // No collision possible
+            }
+            
+            console.log('Bounding boxes overlap, checking pixel collision');
+            
+            // Calculate overlap region
+            const overlapLeft = Math.max(attackerLeft, targetLeft);
+            const overlapRight = Math.min(attackerRight, targetRight);
+            const overlapTop = Math.min(attackerTop, targetTop);
+            const overlapBottom = Math.max(attackerBottom, targetBottom);
+            
+            console.log(`Overlap region: L=${overlapLeft.toFixed(2)}, R=${overlapRight.toFixed(2)}, T=${overlapTop.toFixed(2)}, B=${overlapBottom.toFixed(2)}`);
+            
+            // Convert world coordinates to texture coordinates
+            const attackerTexLeft = Math.floor(((overlapLeft - attackerLeft) / attackerWidth) * attackerData.width);
+            const attackerTexRight = Math.floor(((overlapRight - attackerLeft) / attackerWidth) * attackerData.width);
+            const attackerTexTop = Math.floor(((attackerTop - overlapTop) / attackerHeight) * attackerData.height);
+            const attackerTexBottom = Math.floor(((attackerTop - overlapBottom) / attackerHeight) * attackerData.height);
+            
+            const targetTexLeft = Math.floor(((overlapLeft - targetLeft) / targetWidth) * targetData.width);
+            const targetTexRight = Math.floor(((overlapRight - targetLeft) / targetWidth) * targetData.width);
+            const targetTexTop = Math.floor(((targetTop - overlapTop) / targetHeight) * targetData.height);
+            const targetTexBottom = Math.floor(((targetTop - overlapBottom) / targetHeight) * targetData.height);
+            
+            console.log(`Attacker texture region: L=${attackerTexLeft}, R=${attackerTexRight}, T=${attackerTexTop}, B=${attackerTexBottom}`);
+            console.log(`Target texture region: L=${targetTexLeft}, R=${targetTexRight}, T=${targetTexTop}, B=${targetTexBottom}`);
+            
+            // Sampling rate - check every few pixels for performance
+            const samplingRate = 2; // Reduced from 4 to 2 for more accurate collision detection
+            
+            console.log(`Checking overlap region with dimensions: ${attackerTexRight-attackerTexLeft}x${attackerTexBottom-attackerTexTop}`);
+            
+            // Count non-transparent pixels to help diagnose issues
+            let attackerNonTransparentCount = 0;
+            let targetNonTransparentCount = 0;
+            let overlappingPixelChecks = 0;
+            
+            // Check pixel collision in the overlap region
+            for (let y = attackerTexTop; y < attackerTexBottom; y += samplingRate) {
+                if (y < 0 || y >= attackerData.height) continue;
+                
+                const targetY = targetTexTop + (y - attackerTexTop);
+                if (targetY < 0 || targetY >= targetData.height) continue;
+                
+                for (let x = attackerTexLeft; x < attackerTexRight; x += samplingRate) {
+                    if (x < 0 || x >= attackerData.width) continue;
+                    
+                    const targetX = targetTexLeft + (x - attackerTexLeft);
+                    if (targetX < 0 || targetX >= targetData.width) continue;
+                    
+                    overlappingPixelChecks++;
+                    
+                    // Get pixel indices
+                    const attackerPixelIndex = (y * attackerData.width + x) * 4 + 3; // Alpha channel
+                    const targetPixelIndex = (targetY * targetData.width + targetX) * 4 + 3; // Alpha channel
+                    
+                    // Count non-transparent pixels
+                    if (attackerData.data[attackerPixelIndex] > 50) attackerNonTransparentCount++;
+                    if (targetData.data[targetPixelIndex] > 50) targetNonTransparentCount++;
+                    
+                    // Check if both pixels are non-transparent (alpha > 0)
+                    if (attackerData.data[attackerPixelIndex] > 50 && 
+                        targetData.data[targetPixelIndex] > 50) {
+                        console.log(`Pixel collision detected at attacker(${x},${y}) and target(${targetX},${targetY})`);
+                        return true; // Collision detected!
+                    }
+                }
+            }
+            
+            console.log(`Collision check stats: Checked ${overlappingPixelChecks} pixel pairs, ` +
+                      `Attacker non-transparent: ${attackerNonTransparentCount}, ` +
+                      `Target non-transparent: ${targetNonTransparentCount}`);
+            
+            
+            console.log('No pixel collision detected');
+            return false; // No collision
+        }
         
         // --- Start ---
         init();
