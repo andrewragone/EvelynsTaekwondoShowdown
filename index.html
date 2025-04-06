@@ -338,7 +338,7 @@
             // Start background music
             playBackgroundMusic();
 
-            player = createCharacter(CONFIG.CHARACTER.giColor, false); // Player has no belt
+            player = createCharacter(CONFIG.CHARACTER.giColor, false, false); // Player has no belt
             console.log('Player character created');
             
             // Use the calculated ground level for initial position - player on left
@@ -353,7 +353,7 @@
             
             scene.add(player);
 
-            opponent = createCharacter(CONFIG.CHARACTER.opponentGiColor, true); // Opponent has belt
+            opponent = createCharacter(CONFIG.CHARACTER.opponentGiColor, true, true); // Opponent has belt and is flipped
             console.log('Opponent character created');
             
             // Use the calculated ground level for initial position - opponent on right
@@ -452,7 +452,7 @@
         }
 
         // --- Asset Creation (Mostly unchanged, ensure materials allow transparency where needed) ---
-        function createCharacter(giColor, hasBelt) {
+        function createCharacter(giColor, hasBelt, isOpponent = false) {
             const group = new THREE.Group();
             
             // Load textures
@@ -483,6 +483,12 @@
             
             const plane = new THREE.Mesh(planeGeometry, planeMaterial);
             plane.position.y = 0.0;
+            
+            // If this is the opponent, flip horizontally by scaling negative on X axis
+            if (isOpponent) {
+                plane.scale.x = -1; // This flips the sprite horizontally
+            }
+            
             group.add(plane);
             
             // Store animation data
