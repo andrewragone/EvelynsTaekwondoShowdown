@@ -91,13 +91,14 @@
             },
             MOVEMENT: {
                 speed: 0.05,
-                jumpVelocity: 0.15,
-                gravity: 0.008,
+                jumpVelocity: 0.12, // Increased from 0.08 for higher jumps
+                gravity: 0.0035, // Slightly reduced for better jump arc
+                maxJumpHeight: 2.0, // Increased maximum jump height
             },
             ATTACK: {
                 punchReach: 1.2, punchDamage: 10, punchDuration: 300,
                 kickReach: 1.7, kickDamage: 15, kickDuration: 500,
-                cooldown: 100,
+                cooldown: 0, // Reduced cooldown for more responsive attacks
             },
             AI: {
                 moveIntervalMin: 1000, moveIntervalMax: 2000,
@@ -311,29 +312,49 @@
 
         function startGameplay() {
             clearScene();
+            console.log('Scene cleared for gameplay');
             
             // Remove HTML button if it exists (double-check)
             const startFightButton = document.getElementById('startFightButton');
             if (startFightButton) {
                 startFightButton.parentNode.removeChild(startFightButton);
+                console.log('Start fight button removed');
             }
             
             gameState = 'gameplay';
+            console.log('Game state set to:', gameState);
             
             document.getElementById('instructions').style.display = 'block';
+            console.log('Instructions displayed');
 
             player = createCharacter(CONFIG.CHARACTER.giColor, false); // Player has no belt
+            console.log('Player character created');
+            
             // Use the calculated ground level for initial position - player on left
             player.position.set(CONFIG.ARENA.playerStartX, CONFIG.CHARACTER.legLowerLength / 2, 0);
+            console.log('Player positioned at:', player.position.x, player.position.y, player.position.z);
+            
             // Preserve the limb references by merging the initial state into the existing userData
             Object.assign(player.userData, initialPlayerState);
+            console.log('Player state initialized with textures:', 
+                        'Standing:', !!player.userData.standingTexture, 
+                        'Kick frames:', player.userData.kickTextures ? player.userData.kickTextures.length : 0);
+            
             scene.add(player);
 
             opponent = createCharacter(CONFIG.CHARACTER.opponentGiColor, true); // Opponent has belt
+            console.log('Opponent character created');
+            
             // Use the calculated ground level for initial position - opponent on right
             opponent.position.set(CONFIG.ARENA.opponentStartX, CONFIG.CHARACTER.legLowerLength / 2, 0);
+            console.log('Opponent positioned at:', opponent.position.x, opponent.position.y, opponent.position.z);
+            
             // Preserve the limb references by merging the initial state into the existing userData
             Object.assign(opponent.userData, initialOpponentState);
+            console.log('Opponent state initialized with textures:', 
+                        'Standing:', !!opponent.userData.standingTexture, 
+                        'Kick frames:', opponent.userData.kickTextures ? opponent.userData.kickTextures.length : 0);
+                        
             opponent.userData.nextMoveTime = clock.getElapsedTime() + Math.random() * (CONFIG.AI.moveIntervalMax - CONFIG.AI.moveIntervalMin) / 1000 + CONFIG.AI.moveIntervalMin / 1000;
             opponent.userData.nextAttackTime = clock.getElapsedTime() + Math.random() * (CONFIG.AI.attackIntervalMax - CONFIG.AI.attackIntervalMin) / 1000 + CONFIG.AI.attackIntervalMin / 1000;
             scene.add(opponent);
@@ -432,9 +453,15 @@
                 kickTextures.push(textureLoader.load(`evelyn-kick-${num}.png`));
             }
             
-            // Create sprite with proper aspect ratio for 2285x2428 images
+            // Preload jump frames
+            const jumpTextures = [
+                textureLoader.load('evelyn-jump-001.png'),
+                textureLoader.load('evelyn-jump-002.png')
+            ];
+            
+            // Create sprite with proper aspect ratio
             const aspectRatio = 2285/2428;
-            const planeGeometry = new THREE.PlaneGeometry(aspectRatio * 5.5, 5.5); // Increased from 4.5 to 6.0
+            const planeGeometry = new THREE.PlaneGeometry(aspectRatio * 5.5, 5.5);
             const planeMaterial = new THREE.MeshBasicMaterial({
                 map: standingTexture,
                 transparent: true,
@@ -442,7 +469,7 @@
             });
             
             const plane = new THREE.Mesh(planeGeometry, planeMaterial);
-            plane.position.y = 0.0; // Lowered from 2.25 (~2 inches down)
+            plane.position.y = 0.0;
             group.add(plane);
             
             // Store animation data
@@ -450,8 +477,12 @@
                 body: plane,
                 standingTexture: standingTexture,
                 kickTextures: kickTextures,
+                jumpTextures: jumpTextures,
                 isKicking: false,
-                currentKickFrame: 0
+                isJumping: false,
+                currentKickFrame: 0,
+                currentJumpFrame: 0,
+                kickTimer: 0
             };
             
             return group;
@@ -670,8 +701,18 @@
 
         function onKeyDown(event) {
             keysPressed[event.code] = true;
-            if (event.code === 'Space') { event.preventDefault(); handleAttackInput('player'); }
-            if (event.code === 'ArrowUp') { event.preventDefault(); handleJumpInput('player'); }
+            
+            // Only process gameplay inputs during gameplay state
+            if (gameState === 'gameplay') {
+                if (event.code === 'Space') { 
+                    event.preventDefault(); 
+                    handleAttackInput('player'); 
+                }
+                if (event.code === 'ArrowUp') { 
+                    event.preventDefault(); 
+                    handleJumpInput('player'); 
+                }
+            }
         }
 
         function onKeyUp(event) {
@@ -793,19 +834,26 @@
         // --- Input Processing ---
         function handleJumpInput(characterId) {
             const char = (characterId === 'player') ? player : opponent;
-            if (!char || !char.userData) return; // Guard
+            if (!char || !char.userData) return;
+            
             if (!char.userData.jumping && gameState === 'gameplay') {
                 char.userData.jumping = true;
                 char.userData.velocityY = CONFIG.MOVEMENT.jumpVelocity;
+                // Set initial jump frame
+                char.userData.body.material.map = char.userData.jumpTextures[0];
+                char.userData.body.material.needsUpdate = true;
             }
         }
 
         function handleAttackInput(characterId, attackType) {
             const char = (characterId === 'player') ? player : opponent;
-             if (!char || !char.userData) return; // Guard
+            if (!char || !char.userData) return; // Guard
             const now = clock.getElapsedTime();
 
-            if (!char.userData.attacking && gameState === 'gameplay' && (now - char.userData.lastAttackTime > CONFIG.ATTACK.cooldown / 1000)) {
+            // Ensure we can attack if not currently kicking, regardless of attacking state
+            // This fixes the issue where attacking state might be out of sync
+            if ((!char.userData.isKicking || char.userData.currentKickFrame >= char.userData.kickTextures.length - 1) && 
+                gameState === 'gameplay' && (now - char.userData.lastAttackTime > CONFIG.ATTACK.cooldown / 1000)) {
                 char.userData.attacking = true;
                 // Use specified attack type if provided, otherwise alternate
                 if (attackType) {
@@ -815,7 +863,21 @@
                 } else {
                     char.userData.attackType = (Math.random() < 0.5) ? 'punch' : 'kick'; // AI random attack
                 }
-                char.userData.attackTimer = (char.userData.attackType === 'punch') ? CONFIG.ATTACK.punchDuration : CONFIG.ATTACK.kickDuration;
+                
+                // For kick attacks, also set isKicking for animation
+                if (char.userData.attackType === 'kick') {
+                    // Force reset any previous kick animation
+                    char.userData.isKicking = true;
+                    char.userData.kickTimer = 0;
+                    char.userData.currentKickFrame = 0;
+                    
+                    // Set first frame immediately
+                    char.userData.body.material.map = char.userData.kickTextures[0];
+                    char.userData.body.material.needsUpdate = true;
+                }
+                
+                char.userData.attackTimer = (char.userData.attackType === 'punch') ? 
+                    CONFIG.ATTACK.punchDuration : CONFIG.ATTACK.kickDuration;
                 char.userData.lastAttackTime = now;
             }
         }
@@ -839,13 +901,45 @@
                 }
             }
             
-            // Attack handling (simplified)
+            // Handle jumping physics
+            if (player.userData.jumping) {
+                // Apply gravity (scale with deltaTime for consistent behavior)
+                player.userData.velocityY -= CONFIG.MOVEMENT.gravity * deltaTime * 60;
+                
+                // Update vertical position
+                const newY = player.position.y + player.userData.velocityY;
+                
+                // Enforce maximum jump height
+                if (newY > CONFIG.MOVEMENT.maxJumpHeight) {
+                    player.position.y = CONFIG.MOVEMENT.maxJumpHeight;
+                    player.userData.velocityY = 0; // Start falling
+                } else if (newY <= CONFIG.CHARACTER.legLowerLength / 2) {
+                    // Ground collision - ensure character is at proper floor level
+                    player.position.y = CONFIG.CHARACTER.legLowerLength / 2;
+                    player.userData.jumping = false;
+                    player.userData.velocityY = 0;
+                    
+                    // Explicitly reset to standing texture on landing
+                    player.userData.body.material.map = player.userData.standingTexture;
+                    player.userData.body.material.needsUpdate = true;
+                } else {
+                    player.position.y = newY;
+                }
+            }
+            
+            // Attack handling
             if (player.userData.attacking) {
                 player.userData.attackTimer -= deltaTime * 1000;
                 if (player.userData.attackTimer <= 0) {
                     player.userData.attacking = false;
+                    // Check for hits
                     if (opponent) checkAttackHit(player, opponent);
                 }
+            }
+            
+            // Always ensure attacking state is false when not kicking
+            if (!player.userData.isKicking && player.userData.attacking) {
+                player.userData.attacking = false;
             }
             
             updateHealthBar(true, player.userData.health);
@@ -885,6 +979,11 @@
                     opponent.userData.attacking = false;
                     if (player) checkAttackHit(opponent, player);
                 }
+            }
+            
+            // Always ensure attacking state is false when not kicking
+            if (!opponent.userData.isKicking && opponent.userData.attacking) {
+                opponent.userData.attacking = false;
             }
             
             updateHealthBar(false, opponent.userData.health);
@@ -1002,7 +1101,36 @@
              });
          }
 
+        function updateJumpAnimation(character, deltaTime) {
+            if (!character || !character.userData || !character.userData.body) return;
+            
+            if (character.userData.jumping) {
+                const body = character.userData.body;
+                const jumpTextures = character.userData.jumpTextures;
+                
+                // Update frame based on vertical position and velocity
+                if (character.position.y > 0.5) {
+                    // In air - use second frame
+                    body.material.map = jumpTextures[1];
+                } else if (character.position.y > 0) { 
+                    // Initial jump or landing - use first frame
+                    body.material.map = jumpTextures[0];
+                }
+                // Note: We don't set standing texture here - it's handled in updatePlayer
+                // when character actually lands (position.y <= 0)
+                body.material.needsUpdate = true;
+            } else if (character.position.y === CONFIG.CHARACTER.legLowerLength / 2) {
+                // Safety check - ensure standing texture when on ground
+                character.userData.body.material.map = character.userData.standingTexture;
+                character.userData.body.material.needsUpdate = true;
+            }
+        }
+
         function updateKickAnimation(player, deltaTime) {
+            if (!player || !player.userData || !player.userData.body) {
+                return;
+            }
+            
             if (player.userData.isKicking) {
                 player.userData.kickTimer += deltaTime;
                 
@@ -1019,6 +1147,7 @@
                     } else {
                         // Animation complete
                         player.userData.isKicking = false;
+                        player.userData.attacking = false; // Reset attacking state immediately
                         player.userData.body.material.map = player.userData.standingTexture;
                         player.userData.body.material.needsUpdate = true;
                     }
@@ -1039,12 +1168,16 @@
             });
 
             // Always update animations regardless of game state if objects exist
-             if (gameState === 'intro') updateIntroAnimation(deltaTime);
-             if (gameState === 'ending') updateEndingAnimation(deltaTime);
+            if (gameState === 'intro') updateIntroAnimation(deltaTime);
+            if (gameState === 'ending') updateEndingAnimation(deltaTime);
 
-            // Update kick animations
+            // Update kick animations - IMPORTANT: Process kick animations BEFORE jump animations
             if (player) updateKickAnimation(player, deltaTime);
             if (opponent) updateKickAnimation(opponent, deltaTime);
+            
+            // Update jump animations AFTER kick animations
+            if (player && !player.userData.isKicking) updateJumpAnimation(player, deltaTime);
+            if (opponent && !opponent.userData.isKicking) updateJumpAnimation(opponent, deltaTime);
 
             // Update gameplay logic only in gameplay state
             if (gameState === 'gameplay') {
@@ -1057,17 +1190,9 @@
 
         // --- Start ---
         init();
-
-        // Add space bar event listener
-        document.addEventListener('keydown', (event) => {
-            if (event.code === 'Space' && player && !player.userData.isKicking) {
-                player.userData.isKicking = true;
-                player.userData.kickTimer = 0;
-                player.userData.currentKickFrame = 0;
-                player.userData.body.material.map = player.userData.kickTextures[0];
-                player.userData.body.material.needsUpdate = true;
-            }
-        });
+        
+        // Debug log to confirm initialization
+        console.log('Game initialized, waiting for gameplay to start');
     </script>
 </body>
 </html>
