@@ -225,7 +225,7 @@
         function setupSceneLighting() {
             if (!backgroundSprite) {
                 const textureLoader = new THREE.TextureLoader();
-                textureLoader.load('http://localhost:8000/dojo.jpg', 
+                textureLoader.load('dojo.jpg', 
                     (texture) => {
                         console.log('Background texture loaded successfully');
                         const spriteMaterial = new THREE.SpriteMaterial({ map: texture });
@@ -1324,7 +1324,7 @@
                 if (canHit) {
                     // For debugging purposes, sometimes force a hit for testing
                     // Set to true to test hit mechanics without collision detection
-                    const forceHit = attacker.userData.id === 'player'; // Only force hits for player attacks for now
+                    const forceHit = true; // Force hits for both player and opponent attacks
                     
                     // Use pixel-based collision detection or force hit for testing
                     if (detectPixelCollision(attacker, target) || forceHit) {
