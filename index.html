@@ -1,0 +1,1073 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Evelyn’s Taekwondo Showdown</title>
+    <style>
+        body { margin: 0; overflow: hidden; background-color: #000; }
+        canvas { display: block; }
+        #instructions {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            color: white;
+            font-family: Arial, sans-serif;
+            font-size: 12px;
+            background-color: rgba(0,0,0,0.5);
+            padding: 5px;
+            border-radius: 3px;
+            display: none; /* Hidden by default, shown in gameplay */
+            z-index: 10; /* Ensure it's above canvas */
+        }
+        /* Add styles for HTML health bars */
+        .health-bar {
+            position: fixed;
+            top: 10px;
+            width: 200px;
+            height: 20px;
+            border: 2px solid #fff;
+            background-color: #333;
+            z-index: 10;
+            display: none; /* Hidden by default, shown in gameplay */
+            overflow: hidden; /* Ensure the fill doesn't overflow */
+            border-radius: 5px; /* Rounded corners */
+        }
+        #player-health-bar {
+            left: 10px;
+        }
+        #opponent-health-bar {
+            right: 10px;
+        }
+        .health-bar-fill {
+            width: 100%;
+            height: 100%;
+            background-color: #f00;
+        }
+        #player-health-bar-fill {
+            transform-origin: right center;
+        }
+        #opponent-health-bar-fill {
+            transform-origin: left center;
+        }
+    </style>
+</head>
+<body>
+    <div id="instructions">
+        Desktop: Arrow Keys (Move/Jump), Spacebar (Attack)<br>
+        Mobile: Use On-Screen Buttons
+    </div>
+    <div id="player-health-bar" class="health-bar">
+        <div id="player-health-bar-fill" class="health-bar-fill"></div>
+    </div>
+    <div id="opponent-health-bar" class="health-bar">
+        <div id="opponent-health-bar-fill" class="health-bar-fill"></div>
+    </div>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r134/three.min.js"></script>
+    <script>
+        // --- Configuration ---
+        const CONFIG = {
+            CAMERA_POS: new THREE.Vector3(0, 2, 6), // Moved camera closer to better frame the skinnier dojo
+            CHARACTER: {
+                bodyRadius: 0.4, bodyHeight: 1.5,
+                headRadius: 0.3,
+                shoulderWidth: 0.7,
+                armUpperLength: 0.6, armLowerLength: 0.5, armRadius: 0.15,
+                legUpperLength: 0.7, legLowerLength: 0.7, legRadius: 0.18,
+                beltSize: new THREE.Vector3(0.9, 0.15, 0.45),
+                skinColor: 0xf5d7b2,
+                giColor: 0xffffff,
+                opponentGiColor: 0xff0000,
+                beltColor: 0x000000,
+                jointColor: 0x333333,
+            },
+            ARENA: {
+                width: 8, // Reduced from 10 to make the dojo skinnier
+                floorColor: 0xd3d3d3,
+                playerStartX: -2, // Player on left side
+                opponentStartX: 2, // Opponent on right side
+                boundaryLeft: -3, // Narrower boundaries
+                boundaryRight: 3, // Narrower boundaries
+            },
+            MOVEMENT: {
+                speed: 0.05,
+                jumpVelocity: 0.15,
+                gravity: 0.008,
+            },
+            ATTACK: {
+                punchReach: 1.2, punchDamage: 10, punchDuration: 300,
+                kickReach: 1.7, kickDamage: 15, kickDuration: 500,
+                cooldown: 100,
+            },
+            AI: {
+                moveIntervalMin: 1000, moveIntervalMax: 2000,
+                attackIntervalMin: 1500, attackIntervalMax: 3000,
+                attackProbability: 0.7,
+            },
+            HEALTH: {
+                max: 100,
+                barWidth: 2, barHeight: 0.2, barOffset: 2.5, // Increased from 1.8 to position above heads
+                barColor: 0xff0000,
+                barBackgroundColor: 0x333333, // Added background color for better visibility
+            },
+            UI: {
+                font: 'bold 32px Arial',
+                fontColor: 'white',
+                outlineColor: 'black',
+                buttonWidth: 1.5, buttonHeight: 0.5,
+                mobileButtonSize: 0.8,
+                mobileButtonOpacity: 0.7,
+            },
+            COLORS: {
+                introBg: 0x87ceeb,
+                gameBg: 0x00008b,
+                endBg: 0x800080,
+                startButton: 0xff0000,
+                playAgainButton: 0x00ff00,
+                mobileLeftRight: 0x808080,
+                mobileJump: 0xffff00,
+                mobilePunch: 0xff0000,
+                mobileKick: 0xff6600,
+            },
+            ANIMATION: {
+                textFadeTime: 1000,
+                introHoldTime: 3000,
+                introKickSpeed: 0.015,
+                victoryPoseSpeed: 0.01,
+                kickLegUpperRotation: Math.PI / 3,  // Upper leg rotation for kick
+                kickLegLowerRotation: -Math.PI / 2, // Lower leg rotation for kick
+                punchArmRotation: -Math.PI / 2.5    // Arm rotation for punch
+            },
+            CONFETTI: {
+                count: 50,
+                fallSpeed: 0.05,
+                spawnY: 5,
+                despawnY: -1,
+                colors: [0xff0000, 0x00ff00, 0x0000ff, 0xffff00, 0xff00ff, 0x00ffff],
+            }
+        };
+
+        // --- Global Variables ---
+        let scene, camera, renderer, clock;
+        let gameState = 'loading'; // loading, intro, gameplay, ending
+        let player, opponent;
+        let floor;
+        let introText, startButton, endText, playAgainButton, confetti = [];
+        let playerHealthBar, opponentHealthBar;
+        let mobileButtons = {};
+        let keysPressed = {}; // Store pressed keys/buttons
+        let activeMobileInputs = {}; // Track active pointer IDs for mobile buttons
+        let backgroundSprite; // New global variable for background sprite
+
+        // Initial player/opponent states
+        const initialPlayerState = { jumping: false, velocityY: 0, attacking: false, attackType: 'punch', attackTimer: 0, lastAttackTime: 0, health: CONFIG.HEALTH.max, id: 'player', position: { x: -2 } };
+        const initialOpponentState = { attacking: false, attackType: 'punch', attackTimer: 0, moveDirection: 1, nextMoveTime: 0, nextAttackTime: 0, health: CONFIG.HEALTH.max, id: 'opponent', position: { x: 2 } };
+
+        let raycaster, pointer;
+
+        // Define screen boundaries (adjust these values based on your dojo.jpg dimensions)
+        const SCREEN_LEFT = -5;  // Left edge of visible area
+        const SCREEN_RIGHT = 5;  // Right edge of visible area
+        const CHARACTER_HALF_WIDTH = 1; // Half of character width (since scale.x=2)
+
+        // --- Initialization ---
+        function init() {
+            scene = new THREE.Scene();
+            camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+            camera.position.copy(CONFIG.CAMERA_POS);
+            camera.lookAt(0, 1, 0);
+
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            document.body.appendChild(renderer.domElement);
+
+            clock = new THREE.Clock();
+            raycaster = new THREE.Raycaster();
+            pointer = new THREE.Vector2();
+
+            window.addEventListener('resize', onWindowResize);
+            document.addEventListener('keydown', onKeyDown);
+            document.addEventListener('keyup', onKeyUp);
+            // Mobile / Pointer Events
+            renderer.domElement.addEventListener('pointerdown', onPointerDown);
+            renderer.domElement.addEventListener('pointerup', onPointerUp);
+            renderer.domElement.addEventListener('pointermove', onPointerMove); // Needed to track movement off buttons
+            renderer.domElement.addEventListener('pointerleave', onPointerLeave); // Handle pointer leaving canvas
+
+            createMobileControls();
+            setupSceneLighting();
+
+            gameState = 'intro';
+            setupIntro();
+
+            animate();
+        }
+
+        function setupSceneLighting() {
+            if (!backgroundSprite) {
+                const textureLoader = new THREE.TextureLoader();
+                textureLoader.load('http://localhost:8000/dojo.jpg', 
+                    (texture) => {
+                        console.log('Background texture loaded successfully');
+                        const spriteMaterial = new THREE.SpriteMaterial({ map: texture });
+                        backgroundSprite = new THREE.Sprite(spriteMaterial);
+                        
+                        // Increase scale proportionally for zoom effect
+                        const zoomFactor = 3; // Adjust this value for desired zoom level
+                        backgroundSprite.scale.set(16 * zoomFactor, 9 * zoomFactor, 1);
+                        backgroundSprite.position.z = -15; // Move back further to accommodate zoom
+                        scene.add(backgroundSprite);
+                    },
+                    undefined,
+                    (err) => console.error('Error loading background texture:', err)
+                );
+            } else {
+                scene.add(backgroundSprite);
+            }
+
+            // Add ambient light
+            const ambientLight = new THREE.AmbientLight(0xffffff, 0.5);
+            scene.add(ambientLight);
+
+            // Add directional light
+            const directionalLight = new THREE.DirectionalLight(0xffffff, 0.5);
+            directionalLight.position.set(1, 1, 1).normalize();
+            scene.add(directionalLight);
+        }
+
+        // --- State Management & Scene Setup ---
+        function clearScene() {
+            if (introText) scene.remove(introText);
+            if (startButton) scene.remove(startButton);
+            if (endText) scene.remove(endText);
+            if (playAgainButton) scene.remove(playAgainButton);
+            if (floor) scene.remove(floor);
+            if (player) scene.remove(player);
+            if (opponent) scene.remove(opponent);
+            confetti.forEach(confetto => scene.remove(confetto));
+            confetti = [];
+            
+            // Don't remove backgroundSprite
+            Object.values(mobileButtons).forEach(btn => { btn.visible = false; });
+        }
+
+        function setupIntro() {
+            clearScene();
+            
+            // Hide health bars
+            document.getElementById('player-health-bar').style.display = 'none';
+            document.getElementById('opponent-health-bar').style.display = 'none';
+            
+            gameState = 'intro';
+            Object.values(mobileButtons).forEach(btn => { btn.visible = false; });
+
+            player = createCharacter(CONFIG.CHARACTER.giColor, true);
+            player.position.set(0, 0.75, 0);
+            player.userData.introAnim = { kicking: true, legRotation: 0, returning: false };
+            scene.add(player);
+
+            const introLines = [
+                "Evelyn's Taekwondo Showdown:", "8th Birthday Party Edition", "",
+                "Get ready to kick it at UMAC Briarcliff!"
+            ];
+            introText = createTextMesh(introLines.join('\n'), { x: 0, y: 3, z: 0 }, 0.8, true); // Adjusted scale/pos
+            introText.material.opacity = 0;
+            scene.add(introText);
+
+            // Create a clickable HTML button instead of a 3D button
+            const startButtonHTML = document.createElement('button');
+            startButtonHTML.id = 'startFightButton'; // Add ID for easier selection
+            startButtonHTML.textContent = 'Start Fight';
+            startButtonHTML.style.position = 'absolute';
+            startButtonHTML.style.left = '50%';
+            startButtonHTML.style.top = '70%';
+            startButtonHTML.style.transform = 'translate(-50%, -50%)';
+            startButtonHTML.style.padding = '15px 30px';
+            startButtonHTML.style.fontSize = '24px';
+            startButtonHTML.style.backgroundColor = '#ff0000';
+            startButtonHTML.style.color = 'white';
+            startButtonHTML.style.border = 'none';
+            startButtonHTML.style.borderRadius = '5px';
+            startButtonHTML.style.cursor = 'pointer';
+            startButtonHTML.style.fontFamily = 'Arial, sans-serif';
+            startButtonHTML.style.fontWeight = 'bold';
+            startButtonHTML.style.zIndex = '1000';
+            startButtonHTML.onclick = function() {
+                // Remove the button immediately when clicked
+                if (startButtonHTML.parentNode) {
+                    startButtonHTML.parentNode.removeChild(startButtonHTML);
+                }
+                startGameplay();
+            };
+            document.body.appendChild(startButtonHTML);
+            
+            // Store reference to remove it later
+            startButton = startButtonHTML;
+
+            player.userData.introFadeInTimer = clock.getElapsedTime() + 0.1;
+            player.userData.introHoldTimer = 0;
+            player.userData.introFadeOutTimer = 0;
+        }
+
+        function startGameplay() {
+            clearScene();
+            
+            // Remove HTML button if it exists (double-check)
+            const startFightButton = document.getElementById('startFightButton');
+            if (startFightButton) {
+                startFightButton.parentNode.removeChild(startFightButton);
+            }
+            
+            gameState = 'gameplay';
+            
+            document.getElementById('instructions').style.display = 'block';
+
+            player = createCharacter(CONFIG.CHARACTER.giColor, false); // Player has no belt
+            // Use the calculated ground level for initial position - player on left
+            player.position.set(CONFIG.ARENA.playerStartX, CONFIG.CHARACTER.legLowerLength / 2, 0);
+            // Preserve the limb references by merging the initial state into the existing userData
+            Object.assign(player.userData, initialPlayerState);
+            scene.add(player);
+
+            opponent = createCharacter(CONFIG.CHARACTER.opponentGiColor, true); // Opponent has belt
+            // Use the calculated ground level for initial position - opponent on right
+            opponent.position.set(CONFIG.ARENA.opponentStartX, CONFIG.CHARACTER.legLowerLength / 2, 0);
+            // Preserve the limb references by merging the initial state into the existing userData
+            Object.assign(opponent.userData, initialOpponentState);
+            opponent.userData.nextMoveTime = clock.getElapsedTime() + Math.random() * (CONFIG.AI.moveIntervalMax - CONFIG.AI.moveIntervalMin) / 1000 + CONFIG.AI.moveIntervalMin / 1000;
+            opponent.userData.nextAttackTime = clock.getElapsedTime() + Math.random() * (CONFIG.AI.attackIntervalMax - CONFIG.AI.attackIntervalMin) / 1000 + CONFIG.AI.attackIntervalMin / 1000;
+            scene.add(opponent);
+
+            // Create HTML-based health bars instead of Three.js objects
+            createHTMLHealthBars();
+
+            keysPressed = {};
+            activeMobileInputs = {};
+            Object.values(mobileButtons).forEach(btn => { btn.visible = true; });
+            positionMobileControls();
+        }
+
+        function setupEnding() {
+            clearScene();
+            
+            // Hide health bars
+            document.getElementById('player-health-bar').style.display = 'none';
+            document.getElementById('opponent-health-bar').style.display = 'none';
+            
+            // Remove any existing HTML buttons
+            const startFightButton = document.getElementById('startFightButton');
+            if (startFightButton) {
+                startFightButton.parentNode.removeChild(startFightButton);
+            }
+            const existingPlayAgainButton = document.getElementById('playAgainButton');
+            if (existingPlayAgainButton) {
+                existingPlayAgainButton.parentNode.removeChild(existingPlayAgainButton);
+            }
+            
+            gameState = 'ending';
+            Object.values(mobileButtons).forEach(btn => { btn.visible = false; });
+
+            player = createCharacter(CONFIG.CHARACTER.giColor, true);
+            player.position.set(0, 0.75, 0);
+            player.userData.victoryAnim = { raising: true, armRotation: 0, holding: false, holdTimer: 0 };
+            scene.add(player);
+
+            const endLines = [
+                "Victory!", "To Be Continued at", "Evelyn's Birthday Party!", "",
+                "Join us at UMAC Briarcliff", "528 N State Rd", 
+                "Briarcliff Manor, NY 10510",
+                 "April 26, 2025 @ 1:00 PM", // *** EXAMPLE PARTY TIME ***
+            ];
+            endText = createTextMesh(endLines.join('\n'), { x: 0, y: 3, z: 0 }, 0.7, true); // Adjusted scale/pos
+            endText.material.opacity = 0;
+            scene.add(endText);
+
+            // Create a clickable HTML button for Play Again
+            const playAgainButtonHTML = document.createElement('button');
+            playAgainButtonHTML.id = 'playAgainButton'; // Add ID for easier selection
+            playAgainButtonHTML.textContent = 'Play Again';
+            playAgainButtonHTML.style.position = 'absolute';
+            playAgainButtonHTML.style.left = '50%';
+            playAgainButtonHTML.style.top = '80%';
+            playAgainButtonHTML.style.transform = 'translate(-50%, -50%)';
+            playAgainButtonHTML.style.padding = '15px 30px';
+            playAgainButtonHTML.style.fontSize = '24px';
+            playAgainButtonHTML.style.backgroundColor = '#00ff00';
+            playAgainButtonHTML.style.color = 'white';
+            playAgainButtonHTML.style.border = 'none';
+            playAgainButtonHTML.style.borderRadius = '5px';
+            playAgainButtonHTML.style.cursor = 'pointer';
+            playAgainButtonHTML.style.fontFamily = 'Arial, sans-serif';
+            playAgainButtonHTML.style.fontWeight = 'bold';
+            playAgainButtonHTML.style.zIndex = '1000';
+            playAgainButtonHTML.onclick = function() {
+                // Remove the button immediately when clicked
+                if (playAgainButtonHTML.parentNode) {
+                    playAgainButtonHTML.parentNode.removeChild(playAgainButtonHTML);
+                }
+                startGameplay();
+            };
+            document.body.appendChild(playAgainButtonHTML);
+            
+            // Store reference - use let instead of const for playAgainButton in the global variables
+            playAgainButton = playAgainButtonHTML;
+
+            createConfetti();
+
+            player.userData.endFadeInTimer = clock.getElapsedTime() + 0.5;
+        }
+
+        // --- Asset Creation (Mostly unchanged, ensure materials allow transparency where needed) ---
+        function createCharacter(giColor, hasBelt) {
+            const group = new THREE.Group();
+            
+            // Load textures
+            const textureLoader = new THREE.TextureLoader();
+            const standingTexture = textureLoader.load('evelyn-standing.png');
+            
+            // Preload all kick frames (0001-0010)
+            const kickTextures = [];
+            for (let i = 1; i <= 10; i++) {
+                const num = i.toString().padStart(3, '0');
+                kickTextures.push(textureLoader.load(`evelyn-kick-${num}.png`));
+            }
+            
+            // Create sprite with proper aspect ratio for 2285x2428 images
+            const aspectRatio = 2285/2428;
+            const planeGeometry = new THREE.PlaneGeometry(aspectRatio * 5.5, 5.5); // Increased from 4.5 to 6.0
+            const planeMaterial = new THREE.MeshBasicMaterial({
+                map: standingTexture,
+                transparent: true,
+                side: THREE.DoubleSide
+            });
+            
+            const plane = new THREE.Mesh(planeGeometry, planeMaterial);
+            plane.position.y = 0.0; // Lowered from 2.25 (~2 inches down)
+            group.add(plane);
+            
+            // Store animation data
+            group.userData = {
+                body: plane,
+                standingTexture: standingTexture,
+                kickTextures: kickTextures,
+                isKicking: false,
+                currentKickFrame: 0
+            };
+            
+            return group;
+        }
+
+        function createTextMesh(text, position, scale = 1, transparent = true, centerAlign = true) {
+            const canvas = document.createElement('canvas');
+            const context = canvas.getContext('2d');
+            const lines = text.split('\n');
+            const fontSize = 32 * window.devicePixelRatio; // Adjust for device pixel ratio
+            context.font = CONFIG.UI.font.replace(/\d+px/, fontSize + 'px');
+
+            let maxWidth = 0;
+            lines.forEach(line => { maxWidth = Math.max(maxWidth, context.measureText(line).width); });
+            const lineHeight = fontSize * 1.2;
+            canvas.width = THREE.MathUtils.ceilPowerOfTwo(maxWidth + 20 * window.devicePixelRatio);
+            canvas.height = THREE.MathUtils.ceilPowerOfTwo(lines.length * lineHeight + 10 * window.devicePixelRatio);
+
+            context.font = CONFIG.UI.font.replace(/\d+px/, fontSize + 'px'); // Re-apply font after resize
+            context.fillStyle = CONFIG.UI.fontColor;
+            context.strokeStyle = CONFIG.UI.outlineColor;
+            context.lineWidth = 4 * window.devicePixelRatio;
+            context.textAlign = centerAlign ? 'center' : 'left';
+            context.textBaseline = 'middle'; // Adjust baseline for better centering
+
+            const startX = centerAlign ? canvas.width / 2 : 10 * window.devicePixelRatio;
+            const startY = canvas.height / 2 - (lines.length - 1) * lineHeight / 2; // Center vertically
+
+            lines.forEach((line, index) => {
+                const yPos = startY + index * lineHeight;
+                context.strokeText(line, startX, yPos);
+                context.fillText(line, startX, yPos);
+            });
+
+            const texture = new THREE.CanvasTexture(canvas);
+            texture.needsUpdate = true;
+            texture.minFilter = THREE.LinearFilter; // Nicer scaling
+
+            const material = new THREE.MeshBasicMaterial({
+                map: texture,
+                transparent: transparent,
+                opacity: transparent ? 0 : 1,
+                depthTest: false, // Render text on top
+                depthWrite: false,
+            });
+
+            const planeWidth = canvas.width / (150 / scale); // Adjust scaling base
+            const planeHeight = canvas.height / (150 / scale);
+            const geometry = new THREE.PlaneGeometry(planeWidth, planeHeight);
+            const mesh = new THREE.Mesh(geometry, material);
+            mesh.position.set(position.x, position.y, position.z);
+            mesh.renderOrder = 1; // Ensure text renders on top
+            return mesh;
+        }
+
+        function createButtonMesh(text, color, position) {
+            const canvas = document.createElement('canvas');
+            const context = canvas.getContext('2d');
+            const fontSize = 48 * window.devicePixelRatio;
+            const buttonPadding = 20 * window.devicePixelRatio;
+            context.font = `bold ${fontSize}px Arial`;
+
+            const textMetrics = context.measureText(text);
+            const textWidth = textMetrics.width;
+            canvas.width = THREE.MathUtils.ceilPowerOfTwo(textWidth + buttonPadding * 2);
+            canvas.height = THREE.MathUtils.ceilPowerOfTwo(fontSize * 1.5);
+
+            context.font = `bold ${fontSize}px Arial`; // Re-apply
+
+            context.fillStyle = `rgba(${Math.floor(color >> 16 & 255)}, ${Math.floor(color >> 8 & 255)}, ${Math.floor(color & 255)}, ${0.7})`;
+            context.fillRect(0, 0, canvas.width, canvas.height);
+
+            context.fillStyle = CONFIG.UI.fontColor;
+            context.textAlign = 'center';
+            context.textBaseline = 'middle';
+            context.fillText(text, canvas.width / 2, canvas.height / 2);
+
+            const texture = new THREE.CanvasTexture(canvas); texture.needsUpdate = true; texture.minFilter = THREE.LinearFilter;
+            const geo = new THREE.PlaneGeometry(CONFIG.UI.buttonWidth, CONFIG.UI.buttonHeight);
+            const mat = new THREE.MeshBasicMaterial({ map: texture, transparent: true, depthTest: false, depthWrite: false });
+            const mesh = new THREE.Mesh(geo, mat);
+            mesh.position.set(position.x, position.y, position.z);
+            mesh.renderOrder = 1; // Ensure button renders on top
+            return mesh;
+        }
+
+        function createHTMLHealthBars() {
+            const playerHealthBar = document.getElementById('player-health-bar');
+            const opponentHealthBar = document.getElementById('opponent-health-bar');
+
+            // Show the health bars during gameplay
+            playerHealthBar.style.display = 'block';
+            opponentHealthBar.style.display = 'block';
+
+            // Reset health bar fills to full
+            const playerHealthBarFill = document.getElementById('player-health-bar-fill');
+            playerHealthBarFill.style.width = '100%';
+            playerHealthBarFill.style.transform = 'scaleX(1)';
+
+            const opponentHealthBarFill = document.getElementById('opponent-health-bar-fill');
+            opponentHealthBarFill.style.width = '100%';
+            opponentHealthBarFill.style.transform = 'scaleX(1)';
+        }
+
+        function updateHealthBar(isPlayer, currentHealth) {
+            const healthBar = isPlayer ? document.getElementById('player-health-bar-fill') : document.getElementById('opponent-health-bar-fill');
+            const healthPercentage = Math.max(0, currentHealth / CONFIG.HEALTH.max);
+            
+            // For both bars, we'll use transform to scale them properly from the correct edge
+            healthBar.style.transform = `scaleX(${healthPercentage})`;
+        }
+
+        function createMobileControls() {
+            const buttonSize = CONFIG.UI.mobileButtonSize;
+            const opacity = CONFIG.UI.mobileButtonOpacity;
+
+            const createButton = (color, name, icon) => {
+                const canvas = document.createElement('canvas');
+                canvas.width = 64; canvas.height = 64;
+                const ctx = canvas.getContext('2d');
+
+                ctx.fillStyle = `rgba(${Math.floor(color >> 16 & 255)}, ${Math.floor(color >> 8 & 255)}, ${Math.floor(color & 255)}, ${opacity})`;
+                ctx.beginPath(); ctx.arc(32, 32, 30, 0, Math.PI * 2); ctx.fill();
+
+                ctx.fillStyle = 'white'; ctx.strokeStyle = 'black'; ctx.lineWidth = 3;
+                if (icon === 'left') { ctx.beginPath(); ctx.moveTo(45, 15); ctx.lineTo(19, 32); ctx.lineTo(45, 49); ctx.stroke(); ctx.fill(); }
+                else if (icon === 'right') { ctx.beginPath(); ctx.moveTo(19, 15); ctx.lineTo(45, 32); ctx.lineTo(19, 49); ctx.stroke(); ctx.fill(); }
+                else if (icon === 'up') { ctx.beginPath(); ctx.moveTo(32, 15); ctx.lineTo(47, 30); ctx.lineTo(37, 30); ctx.lineTo(37, 49); ctx.lineTo(27, 49); ctx.lineTo(27, 30); ctx.lineTo(17, 30); ctx.closePath(); ctx.stroke(); ctx.fill(); }
+                else if (icon === 'attack') { ctx.beginPath(); for (let i = 0; i < 8; i++) { const angle = (i / 8) * Math.PI * 2; const radius = (i % 2 === 0) ? 20 : 15; ctx.lineTo(32 + Math.cos(angle) * radius, 32 + Math.sin(angle) * radius); } ctx.closePath(); ctx.stroke(); ctx.fill(); }
+
+                const texture = new THREE.CanvasTexture(canvas); texture.needsUpdate = true; texture.minFilter = THREE.LinearFilter;
+                const geo = new THREE.PlaneGeometry(buttonSize, buttonSize);
+                // Use MeshBasicMaterial, depthTest: false to ensure they are drawn on top and don't interact with scene depth
+                const mat = new THREE.MeshBasicMaterial({ map: texture, transparent: true, opacity: 1, depthTest: false, depthWrite: false });
+                const mesh = new THREE.Mesh(geo, mat);
+                mesh.visible = false;
+                mesh.userData.action = name;
+                mesh.renderOrder = 2; // Render mobile controls above everything else
+                camera.add(mesh); // Add to camera
+                return mesh;
+            };
+
+            mobileButtons.left = createButton(CONFIG.COLORS.mobileLeftRight, 'moveLeft', 'left');
+            mobileButtons.right = createButton(CONFIG.COLORS.mobileLeftRight, 'moveRight', 'right');
+            mobileButtons.jump = createButton(CONFIG.COLORS.mobileJump, 'jump', 'up');
+            mobileButtons.punch = createButton(CONFIG.COLORS.mobilePunch, 'attackPunch', 'attack');
+            mobileButtons.kick = createButton(CONFIG.COLORS.mobileKick, 'attackKick', 'attack');
+            positionMobileControls(); // Set initial positions
+        }
+
+        function positionMobileControls() {
+            if(!mobileButtons.left) return; // Don't position if not created yet
+
+            const H = window.innerHeight;
+            const W = window.innerWidth;
+            // Position based on viewport size using NDC-like values relative to camera
+             const scaleFactor = Math.min(W, H) / 500; // Adjust base size for different screens
+             const btnSize = CONFIG.UI.mobileButtonSize * scaleFactor;
+             const margin = 0.15 * scaleFactor; // Margin scaled too
+
+             Object.values(mobileButtons).forEach(btn => {btn.scale.set(scaleFactor, scaleFactor, 1)});
+
+            // Use view coordinates (relative to camera)
+            const aspect = W / H;
+            const viewHeight = 4; // Adjust this based on camera FOV and distance if needed
+            const viewWidth = viewHeight * aspect;
+            const camZOffset = -3; // Push slightly further away
+
+            // Positioning logic (bottom corners)
+            const bottomY = -viewHeight / 2 + margin + btnSize / 2;
+            const leftX = -viewWidth / 2 + margin + btnSize / 2;
+            const rightX = viewWidth / 2 - margin - btnSize / 2;
+
+            mobileButtons.left.position.set(leftX, bottomY, camZOffset);
+            mobileButtons.right.position.set(leftX + btnSize + margin*0.5, bottomY, camZOffset); // Next to left
+
+            mobileButtons.punch.position.set(rightX, bottomY, camZOffset);
+            mobileButtons.kick.position.set(rightX - btnSize - margin*0.5, bottomY, camZOffset); // Next to punch
+
+            // Ensure buttons added to camera are correctly oriented (only needed if camera moves/rotates significantly)
+            // Object.values(mobileButtons).forEach(btn => btn.lookAt(camera.position)); // Usually not needed if camera is static
+        }
+
+        function createConfetti() {
+            // (Confetti creation code is likely fine, ensure it's added to scene)
+            const confettiGroup = new THREE.Group();
+            confettiGroup.name = 'confettiGroup';
+            const confettiGeo = new THREE.SphereGeometry(0.05, 6, 6);
+
+            for (let i = 0; i < CONFIG.CONFETTI.count; i++) {
+                const confettiMat = new THREE.MeshBasicMaterial({ color: CONFIG.CONFETTI.colors[Math.floor(Math.random() * CONFIG.CONFETTI.colors.length)] });
+                const particle = new THREE.Mesh(confettiGeo, confettiMat);
+                particle.position.set(
+                    (Math.random() - 0.5) * CONFIG.ARENA.width * 0.8,
+                    CONFIG.CONFETTI.spawnY + (Math.random() - 0.5) * 2,
+                    (Math.random() - 0.5) * 2
+                );
+                particle.userData.velocity = new THREE.Vector3(
+                     (Math.random() - 0.5) * 0.01,
+                     -CONFIG.CONFETTI.fallSpeed * (0.8 + Math.random() * 0.4),
+                     (Math.random() - 0.5) * 0.01
+                 );
+                confettiGroup.add(particle);
+                confetti.push(particle);
+            }
+            scene.add(confettiGroup);
+        }
+
+        // --- Event Handlers ---
+        function onWindowResize() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            positionMobileControls();
+        }
+
+        function onKeyDown(event) {
+            keysPressed[event.code] = true;
+            if (event.code === 'Space') { event.preventDefault(); handleAttackInput('player'); }
+            if (event.code === 'ArrowUp') { event.preventDefault(); handleJumpInput('player'); }
+        }
+
+        function onKeyUp(event) {
+            keysPressed[event.code] = false;
+        }
+
+        // --- Pointer (Mouse/Touch) Handlers ---
+        function handlePointerInteraction(event, isDown) {
+             // Calculate pointer position in normalized device coordinates (-1 to +1)
+             pointer.x = (event.clientX / window.innerWidth) * 2 - 1;
+             pointer.y = -(event.clientY / window.innerHeight) * 2 + 1;
+
+             // Raycast against UI buttons attached to camera
+             raycaster.setFromCamera(pointer, camera);
+             const intersectsUI = raycaster.intersectObjects(Object.values(mobileButtons));
+
+             if (intersectsUI.length > 0) {
+                 const button = intersectsUI[0].object;
+                 const action = button.userData.action;
+
+                 if (isDown) {
+                     activeMobileInputs[event.pointerId] = action; // Track which button this pointer pressed
+                     if (action === 'moveLeft') keysPressed['MobileLeft'] = true;
+                     else if (action === 'moveRight') keysPressed['MobileRight'] = true;
+                     else if (action === 'jump') handleJumpInput('player');
+                     else if (action === 'attackPunch' || action === 'attackKick') handleAttackInput('player', action === 'attackPunch' ? 'punch' : 'kick');
+                 }
+                 return true; // Indicate UI interaction happened
+             }
+
+             // Raycast against scene objects (Start/Play Again) only on pointer down
+            if (isDown) {
+                // Use the same raycaster that's already set up with the pointer position
+                if (gameState === 'intro' && startButton) {
+                    // For menu buttons, we need to check recursively to handle button meshes properly
+                    const intersectsScene = raycaster.intersectObject(startButton, true);
+                    if (intersectsScene.length > 0) {
+                        startGameplay(); 
+                        return true;
+                    }
+                } else if (gameState === 'ending' && playAgainButton) {
+                    const intersectsScene = raycaster.intersectObject(playAgainButton, true);
+                     if (intersectsScene.length > 0) {
+                         startGameplay(); 
+                         return true;
+                     }
+                }
+            }
+             return false; // No UI interaction
+         }
+
+        function onPointerDown(event) {
+            event.preventDefault();
+            handlePointerInteraction(event, true);
+        }
+
+        function onPointerUp(event) {
+             event.preventDefault();
+             const releasedAction = activeMobileInputs[event.pointerId];
+             if (releasedAction === 'moveLeft') keysPressed['MobileLeft'] = false;
+             if (releasedAction === 'moveRight') keysPressed['MobileRight'] = false;
+             delete activeMobileInputs[event.pointerId]; // Clear tracked input
+
+             // Might need to check if *any* pointer is still down on a move button
+             // This simple version assumes one touch per button type at a time
+             let stillMovingLeft = false;
+             let stillMovingRight = false;
+             for (const id in activeMobileInputs) {
+                 if (activeMobileInputs[id] === 'moveLeft') stillMovingLeft = true;
+                 if (activeMobileInputs[id] === 'moveRight') stillMovingRight = true;
+             }
+             if (!stillMovingLeft) keysPressed['MobileLeft'] = false;
+             if (!stillMovingRight) keysPressed['MobileRight'] = false;
+        }
+
+        function onPointerMove(event) {
+            // If a pointer moves off its button, treat it as pointer up for that button
+            event.preventDefault();
+             if (!activeMobileInputs[event.pointerId]) return; // Only care if this pointer was down on a button
+
+             pointer.x = (event.clientX / window.innerWidth) * 2 - 1;
+             pointer.y = -(event.clientY / window.innerHeight) * 2 + 1;
+             raycaster.setFromCamera(pointer, camera);
+             const intersectsUI = raycaster.intersectObjects(Object.values(mobileButtons));
+
+             let stillOnButton = false;
+             if (intersectsUI.length > 0) {
+                 if(intersectsUI[0].object.userData.action === activeMobileInputs[event.pointerId]) {
+                    stillOnButton = true;
+                 }
+             }
+
+             if (!stillOnButton) {
+                // Moved off the button, trigger release for that action
+                const releasedAction = activeMobileInputs[event.pointerId];
+                if (releasedAction === 'moveLeft') keysPressed['MobileLeft'] = false;
+                if (releasedAction === 'moveRight') keysPressed['MobileRight'] = false;
+                 delete activeMobileInputs[event.pointerId];
+
+                 // Re-check if any *other* pointer is still holding move buttons
+                 // (Same logic as onPointerUp)
+                 let stillMovingLeft = false;
+                 let stillMovingRight = false;
+                 for (const id in activeMobileInputs) {
+                     if (activeMobileInputs[id] === 'moveLeft') stillMovingLeft = true;
+                     if (activeMobileInputs[id] === 'moveRight') stillMovingRight = true;
+                 }
+                 if (!stillMovingLeft) keysPressed['MobileLeft'] = false;
+                 if (!stillMovingRight) keysPressed['MobileRight'] = false;
+             }
+        }
+
+        function onPointerLeave(event) {
+             // Treat leaving the canvas like pointer up for all active inputs from that pointer
+             event.preventDefault();
+             onPointerUp(event); // Simulate pointer up
+        }
+
+        // --- Input Processing ---
+        function handleJumpInput(characterId) {
+            const char = (characterId === 'player') ? player : opponent;
+            if (!char || !char.userData) return; // Guard
+            if (!char.userData.jumping && gameState === 'gameplay') {
+                char.userData.jumping = true;
+                char.userData.velocityY = CONFIG.MOVEMENT.jumpVelocity;
+            }
+        }
+
+        function handleAttackInput(characterId, attackType) {
+            const char = (characterId === 'player') ? player : opponent;
+             if (!char || !char.userData) return; // Guard
+            const now = clock.getElapsedTime();
+
+            if (!char.userData.attacking && gameState === 'gameplay' && (now - char.userData.lastAttackTime > CONFIG.ATTACK.cooldown / 1000)) {
+                char.userData.attacking = true;
+                // Use specified attack type if provided, otherwise alternate
+                if (attackType) {
+                    char.userData.attackType = attackType;
+                } else if (characterId === 'player') {
+                   char.userData.attackType = (char.userData.attackType === 'punch') ? 'kick' : 'punch';
+                } else {
+                    char.userData.attackType = (Math.random() < 0.5) ? 'punch' : 'kick'; // AI random attack
+                }
+                char.userData.attackTimer = (char.userData.attackType === 'punch') ? CONFIG.ATTACK.punchDuration : CONFIG.ATTACK.kickDuration;
+                char.userData.lastAttackTime = now;
+            }
+        }
+
+        // --- Game Logic ---
+         function updatePlayer(deltaTime) {
+             if (gameState !== 'gameplay' || !player) return;
+            
+            let moveDirection = 0;
+            if (keysPressed['ArrowLeft']) moveDirection -= 1;
+            if (keysPressed['ArrowRight']) moveDirection += 1;
+            if (activeMobileInputs['left']) moveDirection -= 1;
+            if (activeMobileInputs['right']) moveDirection += 1;
+            
+            if (moveDirection !== 0 && !player.userData.attacking) {
+                const newX = player.position.x + moveDirection * CONFIG.MOVEMENT.speed;
+                // Check boundaries
+                if (newX - CHARACTER_HALF_WIDTH > SCREEN_LEFT && 
+                    newX + CHARACTER_HALF_WIDTH < SCREEN_RIGHT) {
+                    player.position.x = newX;
+                }
+            }
+            
+            // Attack handling (simplified)
+            if (player.userData.attacking) {
+                player.userData.attackTimer -= deltaTime * 1000;
+                if (player.userData.attackTimer <= 0) {
+                    player.userData.attacking = false;
+                    if (opponent) checkAttackHit(player, opponent);
+                }
+            }
+            
+            updateHealthBar(true, player.userData.health);
+        }
+
+        function updateOpponent(deltaTime) {
+            if (gameState !== 'gameplay' || !opponent) return;
+            
+            const now = clock.getElapsedTime();
+            if (now > opponent.userData.nextMoveTime && !opponent.userData.attacking) {
+                opponent.userData.moveDirection = (Math.random() < 0.5) ? -1 : 1;
+                opponent.userData.nextMoveTime = now + Math.random() * (CONFIG.AI.moveIntervalMax - CONFIG.AI.moveIntervalMin) / 1000 + CONFIG.AI.moveIntervalMin / 1000;
+            }
+            
+            const newX = opponent.position.x + opponent.userData.moveDirection * CONFIG.MOVEMENT.speed * 0.7;
+            // Check boundaries
+            if (newX - CHARACTER_HALF_WIDTH > SCREEN_LEFT && 
+                newX + CHARACTER_HALF_WIDTH < SCREEN_RIGHT) {
+                opponent.position.x = newX;
+            } else {
+                // Reverse direction if hitting boundary
+                opponent.userData.moveDirection *= -1;
+            }
+            
+            // AI Attacks
+            if (now > opponent.userData.nextAttackTime && !opponent.userData.attacking) {
+                opponent.userData.attacking = true;
+                opponent.userData.attackType = (Math.random() < 0.5) ? 'punch' : 'kick';
+                opponent.userData.attackTimer = (opponent.userData.attackType === 'punch') ? 
+                    CONFIG.ATTACK.punchDuration : CONFIG.ATTACK.kickDuration;
+                opponent.userData.nextAttackTime = now + Math.random() * (CONFIG.AI.attackIntervalMax - CONFIG.AI.attackIntervalMin) / 1000 + CONFIG.AI.attackIntervalMin / 1000;
+            }
+            
+            if (opponent.userData.attacking) {
+                opponent.userData.attackTimer -= deltaTime * 1000;
+                if (opponent.userData.attackTimer <= 0) {
+                    opponent.userData.attacking = false;
+                    if (player) checkAttackHit(opponent, player);
+                }
+            }
+            
+            updateHealthBar(false, opponent.userData.health);
+        }
+
+        function checkAttackHit(attacker, target) {
+            if (!attacker || !target || !attacker.userData || !target.userData || !attacker.userData.attacking) return;
+
+            const attackType = attacker.userData.attackType;
+            const reach = (attackType === 'punch') ? CONFIG.ATTACK.punchReach : CONFIG.ATTACK.kickReach;
+            const damage = (attackType === 'punch') ? CONFIG.ATTACK.punchDamage : CONFIG.ATTACK.kickDamage;
+
+            // Check distance between origins
+            const distance = attacker.position.distanceTo(target.position);
+
+            if (distance < reach) {
+                if (!attacker.userData.hitThisAttack) {
+                    target.userData.health -= damage;
+                    target.userData.health = Math.max(0, target.userData.health);
+                    attacker.userData.hitThisAttack = true; // Mark hit for this attack sequence
+
+                    console.log(`${attacker.userData.id} hit ${target.userData.id} (${attackType}). ${target.userData.id} health: ${target.userData.health}`);
+
+                    // Check for win/loss condition
+                    if (target.userData.health <= 0) {
+                        if(target.userData.id === 'opponent') {
+                              console.log("Player wins!");
+                              setupEnding();
+                         } else {
+                              console.log("Opponent wins! Restarting.");
+                              // Optional: Add a specific 'Game Over' screen later
+                               startGameplay(); // Simple restart for now
+                          }
+                     }
+                 }
+             }
+        }
+
+        // --- Animations (Ensure check for character existence) ---
+         function updateIntroAnimation(deltaTime) {
+            const now = clock.getElapsedTime();
+
+            // Text fade
+            if (introText && player && player.userData) { // Ensure objects exist
+                 if (introText.material.opacity < 1 && player.userData.introFadeInTimer && now >= player.userData.introFadeInTimer) {
+                     introText.material.opacity = Math.min(1, introText.material.opacity + deltaTime / (CONFIG.ANIMATION.textFadeTime / 1000));
+                     if (introText.material.opacity >= 1) player.userData.introHoldTimer = now + CONFIG.ANIMATION.introHoldTime / 1000;
+                 } else if (introText.material.opacity > 0 && player.userData.introHoldTimer && now >= player.userData.introHoldTimer) {
+                     introText.material.opacity = Math.max(0, introText.material.opacity - deltaTime / (CONFIG.ANIMATION.textFadeTime / 1000));
+                 }
+            }
+
+            // Character Kick
+            if (player && player.userData && player.userData.introAnim && player.userData.rightLegUpper) {
+                const anim = player.userData.introAnim;
+                const leg = player.userData.rightLegUpper;
+                const kickSpeed = CONFIG.ANIMATION.introKickSpeed;
+                const maxRotation = -Math.PI / 4;
+
+                if (anim.kicking) {
+                    leg.rotation.x = Math.max(maxRotation, leg.rotation.x - kickSpeed);
+                    if (leg.rotation.x <= maxRotation) { anim.kicking = false; anim.returning = true; }
+                } else if (anim.returning) {
+                    leg.rotation.x = Math.min(0, leg.rotation.x + kickSpeed * 1.5);
+                    if (leg.rotation.x >= 0) anim.returning = false; // Stop animation
+                }
+            }
+        }
+
+        function updateEndingAnimation(deltaTime) {
+            const now = clock.getElapsedTime();
+
+            // Text Fade
+            if (endText && player && player.userData) { // Ensure objects exist
+                if (endText.material.opacity < 1 && player.userData.endFadeInTimer && now >= player.userData.endFadeInTimer) {
+                     endText.material.opacity = Math.min(1, endText.material.opacity + deltaTime / (CONFIG.ANIMATION.textFadeTime / 1000));
+                }
+            }
+
+            // Victory Pose
+            if (player && player.userData && player.userData.victoryAnim && player.userData.leftArmUpper && player.userData.rightArmUpper) {
+                const anim = player.userData.victoryAnim;
+                const leftArm = player.userData.leftArmUpper;
+                const rightArm = player.userData.rightArmUpper;
+                const poseSpeed = CONFIG.ANIMATION.victoryPoseSpeed;
+                const maxRotation = -Math.PI / 3; // Raise arms higher
+
+                if (anim.raising) {
+                     leftArm.rotation.x = Math.max(maxRotation, leftArm.rotation.x - poseSpeed);
+                     rightArm.rotation.x = Math.max(maxRotation, rightArm.rotation.x - poseSpeed); // Match left arm logic
+                     if (leftArm.rotation.x <= maxRotation) {
+                         anim.raising = false; anim.holding = true; anim.holdTimer = now + 1.5; // Hold longer
+                     }
+                 } else if (anim.holding && now >= anim.holdTimer) {
+                     anim.holding = false; anim.returning = true; // Add returning state
+                 } else if (anim.returning) {
+                     leftArm.rotation.x = Math.min(0, leftArm.rotation.x + poseSpeed * 1.5);
+                     rightArm.rotation.x = Math.min(0, rightArm.rotation.x + poseSpeed * 1.5);
+                     if (leftArm.rotation.x >= 0) {
+                         anim.returning = false; // Stop returning
+                         // Optional: restart anim.raising = true;
+                     }
+                 }
+            }
+
+            // Confetti
+            confetti.forEach(particle => {
+                 particle.position.add(particle.userData.velocity);
+                 particle.rotation.x += Math.random() * 0.1;
+                 particle.rotation.y += Math.random() * 0.1;
+                 if (particle.position.y < CONFIG.CONFETTI.despawnY) {
+                      particle.position.set( (Math.random() - 0.5) * CONFIG.ARENA.width * 0.8, CONFIG.CONFETTI.spawnY + Math.random(), (Math.random() - 0.5) * 2 );
+                      particle.userData.velocity.y = -CONFIG.CONFETTI.fallSpeed * (0.8 + Math.random() * 0.4);
+                 }
+             });
+         }
+
+        function updateKickAnimation(player, deltaTime) {
+            if (player.userData.isKicking) {
+                player.userData.kickTimer += deltaTime;
+                
+                // Update frame every 50ms (20fps)
+                if (player.userData.kickTimer >= 0.05) {
+                    player.userData.kickTimer = 0;
+                    player.userData.currentKickFrame++;
+                    
+                    if (player.userData.currentKickFrame < player.userData.kickTextures.length) {
+                        // Show next frame
+                        player.userData.body.material.map = 
+                            player.userData.kickTextures[player.userData.currentKickFrame];
+                        player.userData.body.material.needsUpdate = true;
+                    } else {
+                        // Animation complete
+                        player.userData.isKicking = false;
+                        player.userData.body.material.map = player.userData.standingTexture;
+                        player.userData.body.material.needsUpdate = true;
+                    }
+                }
+            }
+        }
+
+        // --- Main Loop ---
+        function animate() {
+            requestAnimationFrame(animate);
+            const deltaTime = clock.getDelta();
+            
+            // Update billboarding for characters to always face camera
+            scene.traverse(function(object) {
+                if (object.userData && object.userData.isBillboard) {
+                    object.quaternion.copy(camera.quaternion);
+                }
+            });
+
+            // Always update animations regardless of game state if objects exist
+             if (gameState === 'intro') updateIntroAnimation(deltaTime);
+             if (gameState === 'ending') updateEndingAnimation(deltaTime);
+
+            // Update kick animations
+            if (player) updateKickAnimation(player, deltaTime);
+            if (opponent) updateKickAnimation(opponent, deltaTime);
+
+            // Update gameplay logic only in gameplay state
+            if (gameState === 'gameplay') {
+                updatePlayer(deltaTime);
+                updateOpponent(deltaTime);
+            }
+
+            renderer.render(scene, camera);
+        }
+
+        // --- Start ---
+        init();
+
+        // Add space bar event listener
+        document.addEventListener('keydown', (event) => {
+            if (event.code === 'Space' && player && !player.userData.isKicking) {
+                player.userData.isKicking = true;
+                player.userData.kickTimer = 0;
+                player.userData.currentKickFrame = 0;
+                player.userData.body.material.map = player.userData.kickTextures[0];
+                player.userData.body.material.needsUpdate = true;
+            }
+        });
+    </script>
+</body>
+</html>
