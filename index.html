@@ -509,7 +509,10 @@
             const planeMaterial = new THREE.MeshBasicMaterial({
                 map: standingTexture,
                 transparent: true,
-                side: THREE.DoubleSide
+                side: THREE.DoubleSide,
+                depthTest: true, // Enable depth testing
+                depthWrite: true, // Enable depth writing
+                alphaTest: 0.1 // Discard pixels with alpha < 0.1 to prevent semi-transparent edges
             });
             
             const plane = new THREE.Mesh(planeGeometry, planeMaterial);
@@ -518,6 +521,12 @@
             // If this is the opponent, flip horizontally by scaling negative on X axis
             if (isOpponent) {
                 plane.scale.x = -1; // This flips the sprite horizontally
+                plane.position.z = 0.1; // Position opponent slightly behind player to prevent z-fighting
+            } else {
+                plane.position.z = 0; // Player in front
+                
+                // Set renderOrder to ensure player always renders on top when overlapping
+                plane.renderOrder = 1;
             }
             
             group.add(plane);
@@ -1392,6 +1401,8 @@
                 updateOpponent(deltaTime);
             }
 
+            // Clear both the color buffer and depth buffer before rendering
+            renderer.clear(true, true, true);
             renderer.render(scene, camera);
         }
 
