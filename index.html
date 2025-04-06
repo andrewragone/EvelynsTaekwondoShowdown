@@ -250,8 +250,21 @@
             if (floor) scene.remove(floor);
             if (player) scene.remove(player);
             if (opponent) scene.remove(opponent);
-            confetti.forEach(confetto => scene.remove(confetto));
+            
+            // Properly clear all confetti
+            confetti.forEach(confetto => {
+                scene.remove(confetto);
+                // Also dispose of geometries and materials to prevent memory leaks
+                if (confetto.geometry) confetto.geometry.dispose();
+                if (confetto.material) confetto.material.dispose();
+            });
             confetti = [];
+            
+            // Look for and remove any confetti group
+            const confettiGroup = scene.getObjectByName('confettiGroup');
+            if (confettiGroup) {
+                scene.remove(confettiGroup);
+            }
             
             // Don't remove backgroundSprite
             Object.values(mobileButtons).forEach(btn => { btn.visible = false; });
@@ -704,7 +717,21 @@
         }
 
         function createConfetti() {
-            // (Confetti creation code is likely fine, ensure it's added to scene)
+            // First make sure any existing confetti is cleared
+            confetti.forEach(confetto => {
+                scene.remove(confetto);
+                if (confetto.geometry) confetto.geometry.dispose();
+                if (confetto.material) confetto.material.dispose();
+            });
+            confetti = [];
+            
+            // Remove any existing confetti group
+            const existingConfettiGroup = scene.getObjectByName('confettiGroup');
+            if (existingConfettiGroup) {
+                scene.remove(existingConfettiGroup);
+            }
+            
+            // Create new confetti
             const confettiGroup = new THREE.Group();
             confettiGroup.name = 'confettiGroup';
             const confettiGeo = new THREE.SphereGeometry(0.05, 6, 6);
@@ -726,6 +753,7 @@
                 confetti.push(particle);
             }
             scene.add(confettiGroup);
+            console.log('Created new confetti:', confetti.length, 'particles');
         }
 
         // --- Event Handlers ---
@@ -1245,16 +1273,20 @@
                  }
             }
 
-            // Confetti
-            confetti.forEach(particle => {
-                 particle.position.add(particle.userData.velocity);
-                 particle.rotation.x += Math.random() * 0.1;
-                 particle.rotation.y += Math.random() * 0.1;
-                 if (particle.position.y < CONFIG.CONFETTI.despawnY) {
-                      particle.position.set( (Math.random() - 0.5) * CONFIG.ARENA.width * 0.8, CONFIG.CONFETTI.spawnY + Math.random(), (Math.random() - 0.5) * 2 );
-                      particle.userData.velocity.y = -CONFIG.CONFETTI.fallSpeed * (0.8 + Math.random() * 0.4);
-                 }
-             });
+            // Confetti - only update if in ending state
+            if (gameState === 'ending') {
+                confetti.forEach(particle => {
+                    if (particle && particle.userData && particle.userData.velocity) {
+                        particle.position.add(particle.userData.velocity);
+                        particle.rotation.x += Math.random() * 0.1;
+                        particle.rotation.y += Math.random() * 0.1;
+                        if (particle.position.y < CONFIG.CONFETTI.despawnY) {
+                            particle.position.set( (Math.random() - 0.5) * CONFIG.ARENA.width * 0.8, CONFIG.CONFETTI.spawnY + Math.random(), (Math.random() - 0.5) * 2 );
+                            particle.userData.velocity.y = -CONFIG.CONFETTI.fallSpeed * (0.8 + Math.random() * 0.4);
+                        }
+                    }
+                });
+            }
          }
 
         function updateJumpAnimation(character, deltaTime) {
