@@ -153,6 +153,7 @@
         let gameState = 'loading'; // loading, intro, gameplay, ending
         let player, opponent;
         let floor;
+        let backgroundMusic; // Audio element for background music
         let introText, startButton, endText, playAgainButton, confetti = [];
         let playerHealthBar, opponentHealthBar;
         let mobileButtons = {};
@@ -185,6 +186,9 @@
             clock = new THREE.Clock();
             raycaster = new THREE.Raycaster();
             pointer = new THREE.Vector2();
+            
+            // Initialize audio
+            initAudio();
 
             window.addEventListener('resize', onWindowResize);
             document.addEventListener('keydown', onKeyDown);
@@ -259,6 +263,8 @@
             document.getElementById('player-health-bar').style.display = 'none';
             document.getElementById('opponent-health-bar').style.display = 'none';
             
+            // No intro music, only gameplay music
+            
             gameState = 'intro';
             Object.values(mobileButtons).forEach(btn => { btn.visible = false; });
 
@@ -294,12 +300,14 @@
             startButtonHTML.style.fontWeight = 'bold';
             startButtonHTML.style.zIndex = '1000';
             startButtonHTML.onclick = function() {
+                
                 // Remove the button immediately when clicked
                 if (startButtonHTML.parentNode) {
                     startButtonHTML.parentNode.removeChild(startButtonHTML);
                 }
                 startGameplay();
             };
+
             document.body.appendChild(startButtonHTML);
             
             // Store reference to remove it later
@@ -326,6 +334,9 @@
             
             document.getElementById('instructions').style.display = 'block';
             console.log('Instructions displayed');
+            
+            // Start background music
+            playBackgroundMusic();
 
             player = createCharacter(CONFIG.CHARACTER.giColor, false); // Player has no belt
             console.log('Player character created');
@@ -375,6 +386,8 @@
             document.getElementById('player-health-bar').style.display = 'none';
             document.getElementById('opponent-health-bar').style.display = 'none';
             
+            // Stop background music
+            stopBackgroundMusic();
             // Remove any existing HTML buttons
             const startFightButton = document.getElementById('startFightButton');
             if (startFightButton) {
@@ -1188,6 +1201,50 @@
             renderer.render(scene, camera);
         }
 
+        // --- Audio Functions ---
+        function initAudio() {
+            // Create audio element for background music
+            backgroundMusic = new Audio('09. Ryu Stage.mp3');
+            backgroundMusic.loop = true;
+            backgroundMusic.volume = 0.7; // 70% volume
+            
+            // Add a click event listener to the document to enable audio
+            // This helps with browsers that require user interaction
+            document.addEventListener('click', function() {
+                // This empty function just ensures we have user interaction
+                // before trying to play any audio
+            }, { once: true });
+        }
+        
+        function playBackgroundMusic() {
+            // Play background music if it exists
+            if (backgroundMusic) {
+                // Reset to beginning if it was already playing
+                backgroundMusic.currentTime = 0;
+                
+                // Play the music with a user interaction (this is required by browsers)
+                const playPromise = backgroundMusic.play();
+                
+                // Handle potential play() promise rejection
+                if (playPromise !== undefined) {
+                    playPromise.catch(error => {
+                        console.error('Audio playback failed:', error);
+                    });
+                }
+                
+                console.log('Background music started');
+            }
+        }
+        
+        function stopBackgroundMusic() {
+            if (backgroundMusic && !backgroundMusic.paused) {
+                backgroundMusic.pause();
+                console.log('Background music stopped');
+            }
+        }
+        
+
+        
         // --- Start ---
         init();
         
