@@ -164,7 +164,20 @@
 
         // Initial player/opponent states
         const initialPlayerState = { jumping: false, velocityY: 0, attacking: false, attackType: 'punch', attackTimer: 0, lastAttackTime: 0, health: CONFIG.HEALTH.max, id: 'player', position: { x: -2 } };
-        const initialOpponentState = { attacking: false, attackType: 'punch', attackTimer: 0, moveDirection: 1, nextMoveTime: 0, nextAttackTime: 0, health: CONFIG.HEALTH.max, id: 'opponent', position: { x: 2 } };
+        const initialOpponentState = { 
+            attacking: false, 
+            attackType: 'punch', 
+            attackTimer: 0, 
+            moveDirection: 1, 
+            nextMoveTime: 0, 
+            nextAttackTime: 0, 
+            nextJumpTime: 0,
+            jumping: false,
+            velocityY: 0,
+            health: CONFIG.HEALTH.max, 
+            id: 'opponent', 
+            position: { x: 2 } 
+        };
 
         let raycaster, pointer;
 
@@ -346,6 +359,9 @@
             gameState = 'gameplay';
             console.log('Game state set to:', gameState);
             
+            // Reset game clock to ensure consistent timing for AI decisions
+            clock = new THREE.Clock();
+            
             document.getElementById('instructions').style.display = 'block';
             console.log('Instructions displayed');
             
@@ -353,6 +369,7 @@
             playBackgroundMusic();
 
             player = createCharacter(CONFIG.CHARACTER.giColor, false, false); // Player has no belt
+            player.userData.originalColor = new THREE.Color(1, 1, 1); // Store original color for hit effect
             console.log('Player character created');
             
             // Use the calculated ground level for initial position - player on left
@@ -380,8 +397,17 @@
                         'Standing:', !!opponent.userData.standingTexture, 
                         'Kick frames:', opponent.userData.kickTextures ? opponent.userData.kickTextures.length : 0);
                         
-            opponent.userData.nextMoveTime = clock.getElapsedTime() + Math.random() * (CONFIG.AI.moveIntervalMax - CONFIG.AI.moveIntervalMin) / 1000 + CONFIG.AI.moveIntervalMin / 1000;
-            opponent.userData.nextAttackTime = clock.getElapsedTime() + Math.random() * (CONFIG.AI.attackIntervalMax - CONFIG.AI.attackIntervalMin) / 1000 + CONFIG.AI.attackIntervalMin / 1000;
+            // Set initial AI timing values
+            const now = clock.getElapsedTime();
+            opponent.userData.nextMoveTime = now + Math.random() * (CONFIG.AI.moveIntervalMax - CONFIG.AI.moveIntervalMin) / 1000 + CONFIG.AI.moveIntervalMin / 1000;
+            opponent.userData.nextAttackTime = now + Math.random() * (CONFIG.AI.attackIntervalMax - CONFIG.AI.attackIntervalMin) / 1000 + CONFIG.AI.attackIntervalMin / 1000;
+            opponent.userData.nextJumpTime = now + 1 + Math.random() * 2; // First jump decision in 1-3 seconds
+            
+            // Debug log
+            console.log('Opponent AI initialized with timing:', 
+                        'Next move:', opponent.userData.nextMoveTime - now, 
+                        'Next attack:', opponent.userData.nextAttackTime - now,
+                        'Next jump:', opponent.userData.nextJumpTime - now);
             scene.add(opponent);
 
             // Create HTML-based health bars instead of Three.js objects
@@ -472,6 +498,12 @@
             // Set character ID
             group.userData.id = isOpponent ? 'opponent' : 'player';
             console.log(`Creating character: ${group.userData.id}`);
+            
+            // Initialize AI-specific properties for opponent
+            if (isOpponent) {
+                group.userData.nextJumpTime = clock.getElapsedTime() + 2 + Math.random() * 3; // Initial jump decision in 2-5 seconds
+                group.userData.originalColor = new THREE.Color(1, 1, 1); // Store original color for hit effect
+            }
             
             // Load textures
             const textureLoader = new THREE.TextureLoader();
@@ -1042,8 +1074,12 @@
                 player.userData.attackTimer -= deltaTime * 1000;
                 if (player.userData.attackTimer <= 0) {
                     player.userData.attacking = false;
-                    // Check for hits
-                    if (opponent) checkAttackHit(player, opponent);
+                    // Reset hit flag when attack ends
+                    player.userData.hitThisAttack = false;
+                    // For punches, check hit at the end
+                    if (opponent && player.userData.attackType === 'punch') {
+                        checkAttackHit(player, opponent);
+                    }
                 }
             }
             
@@ -1059,64 +1095,178 @@
             if (gameState !== 'gameplay' || !opponent) return;
             
             const now = clock.getElapsedTime();
-            if (now > opponent.userData.nextMoveTime && !opponent.userData.attacking) {
-                opponent.userData.moveDirection = (Math.random() < 0.5) ? -1 : 1;
-                opponent.userData.nextMoveTime = now + Math.random() * (CONFIG.AI.moveIntervalMax - CONFIG.AI.moveIntervalMin) / 1000 + CONFIG.AI.moveIntervalMin / 1000;
+            
+            // Handle jumping physics for opponent
+            if (opponent.userData.jumping) {
+                // Apply gravity (scale with deltaTime for consistent behavior)
+                opponent.userData.velocityY -= CONFIG.MOVEMENT.gravity * deltaTime * 60;
+                
+                // Update vertical position
+                const newY = opponent.position.y + opponent.userData.velocityY;
+                
+                // Enforce maximum jump height
+                if (newY > CONFIG.MOVEMENT.maxJumpHeight) {
+                    opponent.position.y = CONFIG.MOVEMENT.maxJumpHeight;
+                    opponent.userData.velocityY = 0; // Start falling
+                } else if (newY <= CONFIG.CHARACTER.legLowerLength / 2) {
+                    // Ground collision - ensure character is at proper floor level
+                    opponent.position.y = CONFIG.CHARACTER.legLowerLength / 2;
+                    opponent.userData.jumping = false;
+                    opponent.userData.velocityY = 0;
+                    
+                    // Explicitly reset to standing texture on landing
+                    opponent.userData.body.material.map = opponent.userData.standingTexture;
+                    opponent.userData.body.material.needsUpdate = true;
+                } else {
+                    opponent.position.y = newY;
+                }
             }
             
-            // Calculate potential new position
-            const newX = opponent.position.x + opponent.userData.moveDirection * CONFIG.MOVEMENT.speed * 0.7;
+            // AI decision making - make sure opponent has all required properties
+            if (opponent.userData.nextJumpTime === undefined) {
+                opponent.userData.nextJumpTime = now + 1 + Math.random() * 2;
+                console.log('Fixed missing nextJumpTime for opponent');
+            }
             
-            // Check boundaries
-            if (newX - CHARACTER_HALF_WIDTH > SCREEN_LEFT && 
-                newX + CHARACTER_HALF_WIDTH < SCREEN_RIGHT) {
+            // Debug - log opponent state periodically
+            if (Math.floor(now) % 5 === 0 && Math.floor(now) !== opponent.userData.lastDebugTime) {
+                opponent.userData.lastDebugTime = Math.floor(now);
+                console.log('Opponent state:', {
+                    position: opponent.position,
+                    jumping: opponent.userData.jumping,
+                    attacking: opponent.userData.attacking,
+                    isKicking: opponent.userData.isKicking,
+                    attackType: opponent.userData.attackType,
+                    nextJumpTime: opponent.userData.nextJumpTime - now,
+                    nextAttackTime: opponent.userData.nextAttackTime - now
+                });
+            }
+            
+            // AI decision making - only when not jumping or attacking
+            if (!opponent.userData.jumping && !opponent.userData.attacking) {
+                // Decide on movement
+                if (now > opponent.userData.nextMoveTime) {
+                    opponent.userData.moveDirection = (Math.random() < 0.5) ? -1 : 1;
+                    opponent.userData.nextMoveTime = now + Math.random() * (CONFIG.AI.moveIntervalMax - CONFIG.AI.moveIntervalMin) / 1000 + CONFIG.AI.moveIntervalMin / 1000;
+                }
                 
-                // Check if this would cause collision with player
-                let canMove = true;
-                if (player) {
-                    const minDistance = CHARACTER_HALF_WIDTH * 1.5; // Minimum distance between characters
-                    const potentialDistance = Math.abs(newX - player.position.x);
+                // Decide on jumping - 40% chance to jump when decision point is reached
+                if (now > opponent.userData.nextJumpTime && Math.random() < 0.4) {
+                    // Initiate jump
+                    opponent.userData.jumping = true;
+                    opponent.userData.velocityY = CONFIG.MOVEMENT.jumpVelocity;
+                    opponent.userData.body.material.map = opponent.userData.jumpTextures[0];
+                    opponent.userData.body.material.needsUpdate = true;
                     
-                    if (potentialDistance < minDistance) {
-                        console.log(`Opponent collision prevented: would be too close to player (${potentialDistance.toFixed(2)} < ${minDistance.toFixed(2)})`);
-                        canMove = false;
+                    // Set next jump decision time
+                    opponent.userData.nextJumpTime = now + 2 + Math.random() * 2; // 2-4 seconds between jump decisions
+                    console.log('Opponent decided to jump! Next jump decision in', opponent.userData.nextJumpTime - now, 'seconds');
+                }
+                
+                // Decide on attacks - more likely to attack when close to player
+                if (now > opponent.userData.nextAttackTime) {
+                    console.log('Opponent making attack decision at time', now);
+                    const distanceToPlayer = player ? Math.abs(opponent.position.x - player.position.x) : 999;
+                    let attackProbability = 0.5; // Base probability
+                    
+                    // Reset hit flag before new attacks
+                    opponent.userData.hitThisAttack = false;
+                    
+                    // Increase attack probability when close to player
+                    if (distanceToPlayer < CHARACTER_HALF_WIDTH * 3) {
+                        attackProbability = 0.8; // 80% chance to attack when close
+                    }
+                    
+                    // We'll let the existing opponent movement code handle facing direction
+                    
+                    const attackRoll = Math.random();
+                    console.log('Opponent attack probability:', attackProbability, 'Roll:', attackRoll);
+                    if (attackRoll < attackProbability) {
+                        opponent.userData.attacking = true;
                         
-                        // Position opponent at the maximum allowed distance
-                        if (newX < player.position.x) {
-                            // Opponent is to the left of player
-                            opponent.position.x = player.position.x - minDistance;
+                        // More likely to kick when at medium distance, punch when very close
+                        if (distanceToPlayer < CHARACTER_HALF_WIDTH * 2) {
+                            // Close range - prefer punch (70% chance)
+                            opponent.userData.attackType = (Math.random() < 0.3) ? 'punch' : 'kick'; // 70% chance to kick at close range
                         } else {
-                            // Opponent is to the right of player
-                            opponent.position.x = player.position.x + minDistance;
+                            // Medium range - prefer kick (80% chance)
+                            opponent.userData.attackType = (Math.random() < 0.1) ? 'punch' : 'kick'; // 90% chance to kick at medium range
                         }
                         
-                        // Reverse direction when blocked by player
-                        opponent.userData.moveDirection *= -1;
+                        opponent.userData.attackTimer = (opponent.userData.attackType === 'punch') ? 
+                            CONFIG.ATTACK.punchDuration : CONFIG.ATTACK.kickDuration;
+                            
+                        // Start kick animation immediately if kick is chosen
+                        if (opponent.userData.attackType === 'kick' && !opponent.userData.isKicking) {
+                            opponent.userData.isKicking = true;
+                            opponent.userData.currentKickFrame = 0;
+                            opponent.userData.kickTimer = 0;
+                            opponent.userData.body.material.map = opponent.userData.kickTextures[0];
+                            opponent.userData.body.material.needsUpdate = true;
+                            console.log('Opponent started kick animation!');
+                        }
+                            
+                        console.log('Opponent decided to attack with:', opponent.userData.attackType);
                     }
+                    
+                    // Set next attack decision time - shorter interval for more frequent attacks
+                    opponent.userData.nextAttackTime = now + Math.random() * (CONFIG.AI.attackIntervalMax - CONFIG.AI.attackIntervalMin) / 1000 + CONFIG.AI.attackIntervalMin / 2000;
+                    console.log('Next opponent attack decision in', opponent.userData.nextAttackTime - now, 'seconds');
                 }
+            }
+            
+            // Calculate potential new position - only move when not jumping or attacking
+            if (!opponent.userData.jumping && !opponent.userData.attacking) {
+                const newX = opponent.position.x + opponent.userData.moveDirection * CONFIG.MOVEMENT.speed * 0.7;
                 
-                if (canMove) {
-                    opponent.position.x = newX;
+                // Check boundaries
+                if (newX - CHARACTER_HALF_WIDTH > SCREEN_LEFT && 
+                    newX + CHARACTER_HALF_WIDTH < SCREEN_RIGHT) {
+                    
+                    // Check if this would cause collision with player
+                    let canMove = true;
+                    if (player) {
+                        const minDistance = CHARACTER_HALF_WIDTH * 1.5; // Minimum distance between characters
+                        const potentialDistance = Math.abs(newX - player.position.x);
+                        
+                        if (potentialDistance < minDistance) {
+                            console.log(`Opponent collision prevented: would be too close to player (${potentialDistance.toFixed(2)} < ${minDistance.toFixed(2)})`);
+                            canMove = false;
+                            
+                            // Position opponent at the maximum allowed distance
+                            if (newX < player.position.x) {
+                                // Opponent is to the left of player
+                                opponent.position.x = player.position.x - minDistance;
+                            } else {
+                                // Opponent is to the right of player
+                                opponent.position.x = player.position.x + minDistance;
+                            }
+                            
+                            // Reverse direction when blocked by player
+                            opponent.userData.moveDirection *= -1;
+                        }
+                    }
+                    
+                    if (canMove) {
+                        opponent.position.x = newX;
+                    }
+                } else {
+                    // Reverse direction if hitting boundary
+                    opponent.userData.moveDirection *= -1;
                 }
-            } else {
-                // Reverse direction if hitting boundary
-                opponent.userData.moveDirection *= -1;
             }
             
-            // AI Attacks
-            if (now > opponent.userData.nextAttackTime && !opponent.userData.attacking) {
-                opponent.userData.attacking = true;
-                opponent.userData.attackType = (Math.random() < 0.5) ? 'punch' : 'kick';
-                opponent.userData.attackTimer = (opponent.userData.attackType === 'punch') ? 
-                    CONFIG.ATTACK.punchDuration : CONFIG.ATTACK.kickDuration;
-                opponent.userData.nextAttackTime = now + Math.random() * (CONFIG.AI.attackIntervalMax - CONFIG.AI.attackIntervalMin) / 1000 + CONFIG.AI.attackIntervalMin / 1000;
-            }
-            
+            // Process attack timer
             if (opponent.userData.attacking) {
                 opponent.userData.attackTimer -= deltaTime * 1000;
                 if (opponent.userData.attackTimer <= 0) {
                     opponent.userData.attacking = false;
-                    if (player) checkAttackHit(opponent, player);
+                    // Reset hit flag when attack ends
+                    opponent.userData.hitThisAttack = false;
+                    // For punches, check hit at the end
+                    if (player && opponent.userData.attackType === 'punch') {
+                        checkAttackHit(opponent, player);
+                    }
                 }
             }
             
@@ -1130,9 +1280,21 @@
 
         function checkAttackHit(attacker, target) {
             // For kicks, we check during the kick animation, not just when attacking flag is set
-            if (!attacker || !target || !attacker.userData || !target.userData || 
-                (!attacker.userData.attacking && !attacker.userData.isKicking)) {
+            if (!attacker || !target || !attacker.userData || !target.userData) {
+                console.log('Hit check failed: missing character data');
                 return;
+            }
+            
+            // Make sure we're either attacking or kicking
+            if (!attacker.userData.attacking && !attacker.userData.isKicking) {
+                console.log('Hit check failed: character not attacking or kicking');
+                return;
+            }
+            
+            // Initialize hitThisAttack if it doesn't exist
+            if (attacker.userData.hitThisAttack === undefined) {
+                attacker.userData.hitThisAttack = false;
+                console.log(`Initialized hitThisAttack for ${attacker.userData.id}`);
             }
 
             const attackType = attacker.userData.attackType;
@@ -1142,7 +1304,12 @@
             const distance = attacker.position.distanceTo(target.position);
             const reach = (attackType === 'punch') ? CONFIG.ATTACK.punchReach : CONFIG.ATTACK.kickReach;
             
-            console.log(`Attack check: ${attacker.userData.id} (${attackType}) -> ${target.userData.id}, distance: ${distance.toFixed(2)}, reach: ${reach}, already hit: ${attacker.userData.hitThisAttack}`);
+            console.log(`Attack check: ${attacker.userData.id} (${attackType}) -> ${target.userData.id}, distance: ${distance.toFixed(2)}, reach: ${reach}, already hit: ${attacker.userData.hitThisAttack || false}`);
+            
+            // Debug hit detection
+            console.log(`Hit detection details: attacker position: ${attacker.position.x.toFixed(2)}, target position: ${target.position.x.toFixed(2)}`);
+            console.log(`Attacker state: attacking=${attacker.userData.attacking}, isKicking=${attacker.userData.isKicking}, currentKickFrame=${attacker.userData.currentKickFrame || 0}`);
+            
             
             if (distance < reach && !attacker.userData.hitThisAttack) {
                 console.log('Distance check passed, performing collision detection');
@@ -1156,9 +1323,10 @@
                 
                 if (canHit) {
                     // For debugging purposes, sometimes force a hit for testing
-                    const forceHit = true; // Temporarily enable to test hit mechanics
+                    // Set to true to test hit mechanics without collision detection
+                    const forceHit = attacker.userData.id === 'player'; // Only force hits for player attacks for now
                     
-                    // Use pixel-based collision detection
+                    // Use pixel-based collision detection or force hit for testing
                     if (detectPixelCollision(attacker, target) || forceHit) {
                         console.log('Pixel collision detected - registering hit!');
                         
@@ -1167,6 +1335,8 @@
                         target.userData.health = Math.max(0, target.userData.health);
                         attacker.userData.hitThisAttack = true; // Mark hit for this attack sequence
                         target.userData.lastHitTime = clock.getElapsedTime(); // Record hit time
+                        
+                        console.log(`HIT CONFIRMED: ${attacker.userData.id} hit ${target.userData.id} with ${attackType} for ${damage} damage!`);
                         
                         // Visual feedback for hit
                         showHitEffect(target);
@@ -1198,18 +1368,28 @@
         function showHitEffect(target) {
             if (!target || !target.userData || !target.userData.body) return;
             
+            // Store the original color if not already stored
+            if (!target.userData.originalColor) {
+                target.userData.originalColor = new THREE.Color(1, 1, 1); // Default white
+            }
+            
             // Flash the character red briefly
-            const originalColor = target.userData.body.material.color.clone();
             target.userData.body.material.color.set(0xff0000); // Red
             target.userData.body.material.needsUpdate = true;
             
+            // Clear any existing timeout to prevent conflicts
+            if (target.userData.hitEffectTimeout) {
+                clearTimeout(target.userData.hitEffectTimeout);
+            }
+            
             // Reset color after a short delay
-            setTimeout(() => {
+            target.userData.hitEffectTimeout = setTimeout(() => {
                 if (target && target.userData && target.userData.body) {
-                    target.userData.body.material.color.copy(originalColor);
+                    target.userData.body.material.color.copy(target.userData.originalColor);
                     target.userData.body.material.needsUpdate = true;
+                    console.log(`Reset color for ${target.userData.id}`);
                 }
-            }, 150); // 150ms flash
+            }, 200); // 200ms flash
             
             // Log hit for debugging
             console.log(`HIT CONFIRMED on ${target.userData.id}! Current health: ${target.userData.health}`);
@@ -1328,6 +1508,16 @@
                 return;
             }
             
+            // Debug kick animation state if needed
+            if (player.userData.id === 'opponent' && player.userData.isKicking && !player.userData.kickDebugLogged) {
+                console.log('Opponent kick animation active:', {
+                    currentKickFrame: player.userData.currentKickFrame,
+                    kickTextures: player.userData.kickTextures ? player.userData.kickTextures.length : 0,
+                    kickTimer: player.userData.kickTimer
+                });
+                player.userData.kickDebugLogged = true;
+            }
+            
             if (player.userData.isKicking) {
                 player.userData.kickTimer += deltaTime;
                 
@@ -1354,9 +1544,40 @@
                             // Check for hit against opponent
                             if (player.userData.id === 'player' && opponent) {
                                 checkAttackHit(player, opponent);
-                            } else if (player.userData.id === 'opponent' && player) {
+                            } else if (player.userData.id === 'opponent' && window.player) {
                                 // Note: player here is the opponent character, and the target is the player character
-                                checkAttackHit(player, window.player);
+                                console.log('Opponent checking kick hit against player');
+                                
+                                // Reset hitThisAttack flag to allow multiple hit checks during the kick animation
+                                if (player.userData.currentKickFrame === 3) {
+                                    player.userData.hitThisAttack = false;
+                                    console.log('Reset opponent hitThisAttack flag for new kick');
+                                }
+                                
+                                // Force the attack type to be 'kick' for opponent kicks
+                                player.userData.attackType = 'kick';
+                                player.userData.attacking = true; // Ensure attacking flag is set
+                                
+                                // Directly apply damage for opponent kicks during the extended part of the kick animation
+                                // We check frames 4-6 for more reliable hit detection
+                                const distanceToPlayer = Math.abs(player.position.x - window.player.position.x);
+                                if (window.player && player.userData.currentKickFrame >= 4 && player.userData.currentKickFrame <= 6 && 
+                                    !player.userData.hitThisAttack && distanceToPlayer < CONFIG.ATTACK.kickReach) {
+                                    console.log(`DIRECT HIT: Opponent kick hit player on frame ${player.userData.currentKickFrame}`);
+                                    // Apply damage to player
+                                    window.player.userData.health -= CONFIG.ATTACK.kickDamage;
+                                    window.player.userData.health = Math.max(0, window.player.userData.health);
+                                    // Mark this attack as having hit
+                                    player.userData.hitThisAttack = true;
+                                    // Show visual feedback
+                                    showHitEffect(window.player);
+                                    // Update health bar
+                                    updateHealthBar(true, window.player.userData.health);
+                                    console.log(`Player health after hit: ${window.player.userData.health}`);
+                                }
+                                
+                                // Debug hit check
+                                console.log('Opponent kick hit check - opponent hitThisAttack:', player.userData.hitThisAttack);
                             }
                         }
                     } else {
@@ -1366,6 +1587,7 @@
                         player.userData.attacking = false; // Reset attacking state immediately
                         player.userData.body.material.map = player.userData.standingTexture;
                         player.userData.body.material.needsUpdate = true;
+                        player.userData.kickDebugLogged = false; // Reset debug flag
                     }
                 }
             }
@@ -1557,10 +1779,10 @@
             
             // Calculate the overlap region between the two sprites
             // For simplicity, we'll use the character's size and position
-            const attackerWidth = 1.0; // Character width in world units
-            const attackerHeight = 2.0; // Character height in world units
-            const targetWidth = 1.0;
-            const targetHeight = 2.0;
+            const attackerWidth = 1.5; // Character width in world units - increased for better hit detection
+            const attackerHeight = 2.5; // Character height in world units - increased for better hit detection
+            const targetWidth = 1.5; // Increased for better hit detection
+            const targetHeight = 2.5; // Increased for better hit detection
             
             // Calculate world space boundaries
             const attackerLeft = attackerWorldPos.x - attackerWidth/2;
@@ -1580,15 +1802,23 @@
             let extendedAttackerRight = attackerRight;
             if (attacker.userData.isKicking && attacker.userData.currentKickFrame >= 3 && attacker.userData.currentKickFrame <= 9) {
                 // Extend the attacker's bounding box in the direction they're facing
-                const extendAmount = 1.5; // Extend by 1.5 units
-                if (attacker.position.x < target.position.x) {
-                    // Attacker is to the left of target, extend right
+                const extendAmount = 2.0; // Extend by 2.0 units for better hit detection
+                
+                // Determine which direction to extend based on character orientation
+                // For opponent (who is flipped), we need to reverse the direction
+                // Debug orientation
+                console.log(`Extending kick box: attacker=${attacker.userData.id}, positions: attacker=${attacker.position.x.toFixed(2)}, target=${target.position.x.toFixed(2)}`);
+                
+                if ((attacker.userData.id === 'player' && attacker.position.x < target.position.x) ||
+                    (attacker.userData.id === 'opponent' && attacker.position.x > target.position.x)) {
+                    // Extend right
                     extendedAttackerRight = attackerRight + extendAmount;
+                    console.log(`Extended kick bounding box RIGHT: L=${attackerLeft.toFixed(2)}, R=${extendedAttackerRight.toFixed(2)}`);
                 } else {
-                    // Attacker is to the right of target, extend left
+                    // Extend left
                     attackerLeft = attackerLeft - extendAmount;
+                    console.log(`Extended kick bounding box LEFT: L=${attackerLeft.toFixed(2)}, R=${extendedAttackerRight.toFixed(2)}`);
                 }
-                console.log(`Extended kick bounding box: L=${attackerLeft.toFixed(2)}, R=${extendedAttackerRight.toFixed(2)}`);
             }
             
             // Check if bounding boxes overlap
