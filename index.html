@@ -1293,11 +1293,13 @@
             const attackType = attacker.userData.attackType;
             const damage = (attackType === 'punch') ? CONFIG.ATTACK.punchDamage : CONFIG.ATTACK.kickDamage;
 
-            // First check if they're close enough for a potential hit (optimization)
-            const distance = attacker.position.distanceTo(target.position);
+            // Calculate distance based on X and Y only, ignoring Z
+            const dx = attacker.position.x - target.position.x;
+            const dy = attacker.position.y - target.position.y;
+            const distance = Math.sqrt(dx * dx + dy * dy);
             const reach = (attackType === 'punch') ? CONFIG.ATTACK.punchReach : CONFIG.ATTACK.kickReach;
             
-            console.log(`Attack check: ${attacker.userData.id} (${attackType}) -> ${target.userData.id}, distance: ${distance.toFixed(2)}, reach: ${reach}, already hit: ${attacker.userData.hitThisAttack || false}`);
+            console.log(`Attack check: ${attacker.userData.id} (${attackType}) -> ${target.userData.id}, distance (2D): ${distance.toFixed(2)}, reach: ${reach}, already hit: ${attacker.userData.hitThisAttack || false}`);
             
             // Debug hit detection
             console.log('Hit detection details: attacker position: ${attacker.position.x.toFixed(2)}, target position: ${target.position.x.toFixed(2)}');
@@ -1315,14 +1317,10 @@
                 }
                 
                 if (canHit) {
-                    // For debugging purposes, sometimes force a hit for testing
-                    // Set to true to test hit mechanics without collision detection
-                    const forceHit = true; // Force hits for both player and opponent attacks
-                    
-                    // Use pixel-based collision detection or force hit for testing
-                    if (detectPixelCollision(attacker, target) || forceHit) {
+                    // Use pixel-based collision detection
+                    if (detectPixelCollision(attacker, target)) {
                         console.log('Pixel collision detected - registering hit!');
-                        
+
                         // Hit detected!
                         target.userData.health -= damage;
                         target.userData.health = Math.max(0, target.userData.health);
@@ -1344,10 +1342,10 @@
                             if(target.userData.id === 'opponent') {
                                 console.log("Player wins!");
                                 setupEnding();
-                            } else {
-                                console.log("Opponent wins! Restarting.");
-                                // Optional: Add a specific 'Game Over' screen later
-                                startGameplay(); // Simple restart for now
+                            } else { // Opponent wins (target is player)
+                                console.log("Opponent wins! Going to end screen.");
+                                // Call setupEnding() for both win/loss
+                                setupEnding(); 
                             }
                         }
                     } else {
@@ -1496,11 +1494,12 @@
             }
         }
 
-        function updateKickAnimation(player, deltaTime) {
+        // Added targetCharacter parameter
+        function updateKickAnimation(player, deltaTime, targetCharacter) {
             if (!player || !player.userData || !player.userData.body) {
                 return;
             }
-            
+
             // Debug kick animation state if needed
             if (player.userData.id === 'opponent' && player.userData.isKicking && !player.userData.kickDebugLogged) {
                 console.log('Opponent kick animation active:', {
@@ -1534,43 +1533,9 @@
                         // Check for hits on frames where the kick is extended (frames 3-9)
                         if (player.userData.currentKickFrame >= 3 && player.userData.currentKickFrame <= 9) {
                             console.log(`${player.userData.id} checking for kick hit on frame ${player.userData.currentKickFrame}`);
-                            // Check for hit against opponent
-                            if (player.userData.id === 'player' && opponent) {
-                                checkAttackHit(player, opponent);
-                            } else if (player.userData.id === 'opponent' && window.player) {
-                                // Note: player here is the opponent character, and the target is the player character
-                                console.log('Opponent checking kick hit against player');
-                                
-                                // Reset hitThisAttack flag to allow multiple hit checks during the kick animation
-                                if (player.userData.currentKickFrame === 3) {
-                                    player.userData.hitThisAttack = false;
-                                    console.log('Reset opponent hitThisAttack flag for new kick');
-                                }
-                                
-                                // Force the attack type to be 'kick' for opponent kicks
-                                player.userData.attackType = 'kick';
-                                player.userData.attacking = true; // Ensure attacking flag is set
-                                
-                                // Directly apply damage for opponent kicks during the extended part of the kick animation
-                                // We check frames 4-6 for more reliable hit detection
-                                const distanceToPlayer = Math.abs(player.position.x - window.player.position.x);
-                                if (window.player && player.userData.currentKickFrame >= 4 && player.userData.currentKickFrame <= 6 && 
-                                    !player.userData.hitThisAttack && distanceToPlayer < CONFIG.ATTACK.kickReach) {
-                                    console.log(`DIRECT HIT: Opponent kick hit player on frame ${player.userData.currentKickFrame}`);
-                                    // Apply damage to player
-                                    window.player.userData.health -= CONFIG.ATTACK.kickDamage;
-                                    window.player.userData.health = Math.max(0, window.player.userData.health);
-                                    // Mark this attack as having hit
-                                    player.userData.hitThisAttack = true;
-                                    // Show visual feedback
-                                    showHitEffect(window.player);
-                                    // Update health bar
-                                    updateHealthBar(true, window.player.userData.health);
-                                    console.log(`Player health after hit: ${window.player.userData.health}`);
-                                }
-                                
-                                // Debug hit check
-                                console.log('Opponent kick hit check - opponent hitThisAttack:', player.userData.hitThisAttack);
+                            // Check for hit using the passed targetCharacter
+                            if (targetCharacter) {
+                                checkAttackHit(player, targetCharacter);
                             }
                         }
                     } else {
@@ -1603,9 +1568,10 @@
             if (gameState === 'ending') updateEndingAnimation(deltaTime);
 
             // Update kick animations - IMPORTANT: Process kick animations BEFORE jump animations
-            if (player) updateKickAnimation(player, deltaTime);
-            if (opponent) updateKickAnimation(opponent, deltaTime);
-            
+            // Pass the correct target character
+            if (player) updateKickAnimation(player, deltaTime, opponent);
+            if (opponent) updateKickAnimation(opponent, deltaTime, player);
+
             // Update jump animations AFTER kick animations
             if (player && !player.userData.isKicking) updateJumpAnimation(player, deltaTime);
             if (opponent && !opponent.userData.isKicking) updateJumpAnimation(opponent, deltaTime);
@@ -1771,28 +1737,33 @@
             target.getWorldPosition(targetWorldPos);
             
             // Calculate the overlap region between the two sprites
-            // For simplicity, we'll use the character's size and position
-            const attackerWidth = 1.5; // Character width in world units - increased for better hit detection
-            const attackerHeight = 2.5; // Character height in world units - increased for better hit detection
-            const targetWidth = 1.5; // Increased for better hit detection
-            const targetHeight = 2.5; // Increased for better hit detection
+            // Use actual geometry dimensions
+            const attackerWidth = attacker.userData.body.geometry.parameters.width;
+            const attackerHeight = attacker.userData.body.geometry.parameters.height;
+            const targetWidth = target.userData.body.geometry.parameters.width;
+            const targetHeight = target.userData.body.geometry.parameters.height;
             
-            // Calculate world space boundaries
-            const attackerLeft = attackerWorldPos.x - attackerWidth/2;
-            const attackerRight = attackerWorldPos.x + attackerWidth/2;
-            const attackerTop = attackerWorldPos.y + attackerHeight/2;
-            const attackerBottom = attackerWorldPos.y - attackerHeight/2;
-            
-            const targetLeft = targetWorldPos.x - targetWidth/2;
-            const targetRight = targetWorldPos.x + targetWidth/2;
-            const targetTop = targetWorldPos.y + targetHeight/2;
-            const targetBottom = targetWorldPos.y - targetHeight/2;
-            
-            console.log(`Attacker bounds: L=${attackerLeft.toFixed(2)}, R=${attackerRight.toFixed(2)}, T=${attackerTop.toFixed(2)}, B=${attackerBottom.toFixed(2)}`);
-            console.log(`Target bounds: L=${targetLeft.toFixed(2)}, R=${targetRight.toFixed(2)}, T=${targetTop.toFixed(2)}, B=${targetBottom.toFixed(2)}`);
-            
-            // For kicks, use an extended bounding box to account for the kick reach
-            let extendedAttackerRight = attackerRight;
+            // Calculate ORIGINAL world space boundaries (used for texture mapping)
+            const origAttackerLeft = attackerWorldPos.x - attackerWidth/2;
+            const origAttackerRight = attackerWorldPos.x + attackerWidth/2;
+            const origAttackerTop = attackerWorldPos.y + attackerHeight/2;
+            const origAttackerBottom = attackerWorldPos.y - attackerHeight/2;
+
+            const origTargetLeft = targetWorldPos.x - targetWidth/2;
+            const origTargetRight = targetWorldPos.x + targetWidth/2;
+            const origTargetTop = targetWorldPos.y + targetHeight/2;
+            const origTargetBottom = targetWorldPos.y - targetHeight/2;
+
+            console.log(`Attacker Original Bounds: L=${origAttackerLeft.toFixed(2)}, R=${origAttackerRight.toFixed(2)}, T=${origAttackerTop.toFixed(2)}, B=${origAttackerBottom.toFixed(2)}`);
+            console.log(`Target Original Bounds: L=${origTargetLeft.toFixed(2)}, R=${origTargetRight.toFixed(2)}, T=${origTargetTop.toFixed(2)}, B=${origTargetBottom.toFixed(2)}`);
+
+            // Calculate potentially extended boundaries for overlap check during kicks
+            let overlapCheckAttackerLeft = origAttackerLeft;
+            let overlapCheckAttackerRight = origAttackerRight;
+            // Use original top/bottom for overlap check as kick extends horizontally
+            const overlapCheckAttackerTop = origAttackerTop;
+            const overlapCheckAttackerBottom = origAttackerBottom;
+
             if (attacker.userData.isKicking && attacker.userData.currentKickFrame >= 3 && attacker.userData.currentKickFrame <= 9) {
                 // Extend the attacker's bounding box in the direction they're facing
                 const extendAmount = 2.0; // Extend by 2.0 units for better hit detection
@@ -1805,93 +1776,71 @@
                 if ((attacker.userData.id === 'player' && attacker.position.x < target.position.x) ||
                     (attacker.userData.id === 'opponent' && attacker.position.x > target.position.x)) {
                     // Extend right
-                    extendedAttackerRight = attackerRight + extendAmount;
-                    console.log(`Extended kick bounding box RIGHT: L=${attackerLeft.toFixed(2)}, R=${extendedAttackerRight.toFixed(2)}`);
+                    overlapCheckAttackerRight = origAttackerRight + extendAmount;
+                    console.log(`Extended kick bounding box RIGHT: L=${overlapCheckAttackerLeft.toFixed(2)}, R=${overlapCheckAttackerRight.toFixed(2)}`);
                 } else {
                     // Extend left
-                    attackerLeft = attackerLeft - extendAmount;
-                    console.log(`Extended kick bounding box LEFT: L=${attackerLeft.toFixed(2)}, R=${extendedAttackerRight.toFixed(2)}`);
+                    overlapCheckAttackerLeft = origAttackerLeft - extendAmount;
+                    console.log(`Extended kick bounding box LEFT: L=${overlapCheckAttackerLeft.toFixed(2)}, R=${overlapCheckAttackerRight.toFixed(2)}`);
                 }
             }
-            
-            // Check if bounding boxes overlap
-            if (extendedAttackerRight < targetLeft || attackerLeft > targetRight || 
-                attackerBottom > targetTop || attackerTop < targetBottom) {
+
+            // Check if bounding boxes overlap (using extended attacker box and original target box)
+            if (overlapCheckAttackerRight < origTargetLeft || overlapCheckAttackerLeft > origTargetRight ||
+                overlapCheckAttackerBottom > origTargetTop || overlapCheckAttackerTop < origTargetBottom) {
                 console.log('No bounding box overlap detected');
                 return false; // No collision possible
             }
             
             console.log('Bounding boxes overlap, checking pixel collision');
-            
-            // Calculate overlap region
-            const overlapLeft = Math.max(attackerLeft, targetLeft);
-            const overlapRight = Math.min(attackerRight, targetRight);
-            const overlapTop = Math.min(attackerTop, targetTop);
-            const overlapBottom = Math.max(attackerBottom, targetBottom);
-            
-            console.log(`Overlap region: L=${overlapLeft.toFixed(2)}, R=${overlapRight.toFixed(2)}, T=${overlapTop.toFixed(2)}, B=${overlapBottom.toFixed(2)}`);
-            
-            // Convert world coordinates to texture coordinates
-            const attackerTexLeft = Math.floor(((overlapLeft - attackerLeft) / attackerWidth) * attackerData.width);
-            const attackerTexRight = Math.floor(((overlapRight - attackerLeft) / attackerWidth) * attackerData.width);
-            const attackerTexTop = Math.floor(((attackerTop - overlapTop) / attackerHeight) * attackerData.height);
-            const attackerTexBottom = Math.floor(((attackerTop - overlapBottom) / attackerHeight) * attackerData.height);
-            
-            const targetTexLeft = Math.floor(((overlapLeft - targetLeft) / targetWidth) * targetData.width);
-            const targetTexRight = Math.floor(((overlapRight - targetLeft) / targetWidth) * targetData.width);
-            const targetTexTop = Math.floor(((targetTop - overlapTop) / targetHeight) * targetData.height);
-            const targetTexBottom = Math.floor(((targetTop - overlapBottom) / targetHeight) * targetData.height);
-            
-            console.log(`Attacker texture region: L=${attackerTexLeft}, R=${attackerTexRight}, T=${attackerTexTop}, B=${attackerTexBottom}`);
-            console.log(`Target texture region: L=${targetTexLeft}, R=${targetTexRight}, T=${targetTexTop}, B=${targetTexBottom}`);
-            
-            // Sampling rate - check every few pixels for performance
-            const samplingRate = 2; // Reduced from 4 to 2 for more accurate collision detection
-            
-            console.log(`Checking overlap region with dimensions: ${attackerTexRight-attackerTexLeft}x${attackerTexBottom-attackerTexTop}`);
-            
-            // Count non-transparent pixels to help diagnose issues
-            let attackerNonTransparentCount = 0;
-            let targetNonTransparentCount = 0;
+
+            // Calculate overlap region using extended attacker and original target bounds for iteration
+            const overlapLeft = Math.max(overlapCheckAttackerLeft, origTargetLeft);
+            const overlapRight = Math.min(overlapCheckAttackerRight, origTargetRight);
+            const overlapTop = Math.min(overlapCheckAttackerTop, origTargetTop);
+            const overlapBottom = Math.max(overlapCheckAttackerBottom, origTargetBottom);
+
+            console.log(`Overlap region (World Coords): L=${overlapLeft.toFixed(2)}, R=${overlapRight.toFixed(2)}, T=${overlapTop.toFixed(2)}, B=${overlapBottom.toFixed(2)}`);
+
+            const worldStep = 0.1; // Sample every 0.1 world units in the overlap
             let overlappingPixelChecks = 0;
-            
-            // Check pixel collision in the overlap region
-            for (let y = attackerTexTop; y < attackerTexBottom; y += samplingRate) {
-                if (y < 0 || y >= attackerData.height) continue;
-                
-                const targetY = targetTexTop + (y - attackerTexTop);
-                if (targetY < 0 || targetY >= targetData.height) continue;
-                
-                for (let x = attackerTexLeft; x < attackerTexRight; x += samplingRate) {
-                    if (x < 0 || x >= attackerData.width) continue;
-                    
-                    const targetX = targetTexLeft + (x - attackerTexLeft);
-                    if (targetX < 0 || targetX >= targetData.width) continue;
-                    
+
+            // Iterate through the world-space overlap region
+            for (let worldY = overlapBottom; worldY < overlapTop; worldY += worldStep) {
+                for (let worldX = overlapLeft; worldX < overlapRight; worldX += worldStep) {
                     overlappingPixelChecks++;
-                    
-                    // Get pixel indices
-                    const attackerPixelIndex = (y * attackerData.width + x) * 4 + 3; // Alpha channel
-                    const targetPixelIndex = (targetY * targetData.width + targetX) * 4 + 3; // Alpha channel
-                    
-                    // Count non-transparent pixels
-                    if (attackerData.data[attackerPixelIndex] > 50) attackerNonTransparentCount++;
-                    if (targetData.data[targetPixelIndex] > 50) targetNonTransparentCount++;
-                    
-                    // Check if both pixels are non-transparent (alpha > 0)
-                    if (attackerData.data[attackerPixelIndex] > 50 && 
-                        targetData.data[targetPixelIndex] > 50) {
-                        console.log(`Pixel collision detected at attacker(${x},${y}) and target(${targetX},${targetY})`);
+
+                    // --- Calculate Attacker Texture Coordinate (using ORIGINAL bounds) ---
+                    const normXA = (worldX - origAttackerLeft) / attackerWidth;
+                    const normYA = (origAttackerTop - worldY) / attackerHeight; // Y is inverted
+                    const attackerTexX = Math.floor( (attacker.userData.body.scale.x < 0 ? (1 - normXA) : normXA) * attackerData.width );
+                    const attackerTexY = Math.floor( normYA * attackerData.height );
+
+                    // --- Calculate Target Texture Coordinate (using ORIGINAL bounds) ---
+                    const normXT = (worldX - origTargetLeft) / targetWidth;
+                    const normYT = (origTargetTop - worldY) / targetHeight; // Y is inverted
+                    const targetTexX = Math.floor( (target.userData.body.scale.x < 0 ? (1 - normXT) : normXT) * targetData.width );
+                    const targetTexY = Math.floor( normYT * targetData.height );
+
+                    // --- Bounds Check (Texture Coordinates) ---
+                    if (attackerTexX < 0 || attackerTexX >= attackerData.width || attackerTexY < 0 || attackerTexY >= attackerData.height ||
+                        targetTexX < 0 || targetTexX >= targetData.width || targetTexY < 0 || targetTexY >= targetData.height) {
+                        continue; // Skip pixels outside texture bounds
+                    }
+
+                    // --- Alpha Check ---
+                    const attackerPixelIndex = (attackerTexY * attackerData.width + attackerTexX) * 4 + 3; // Alpha channel
+                    const targetPixelIndex = (targetTexY * targetData.width + targetTexX) * 4 + 3; // Alpha channel
+
+                    if (attackerData.data[attackerPixelIndex] > 50 && targetData.data[targetPixelIndex] > 50) {
+                         // Log the exact point of collision
+                        console.log(`Pixel collision DETECTED at world(${worldX.toFixed(2)},${worldY.toFixed(2)}) -> attacker(${attackerTexX},${attackerTexY})[A:${attackerData.data[attackerPixelIndex]}] & target(${targetTexX},${targetTexY})[A:${targetData.data[targetPixelIndex]}]`);
                         return true; // Collision detected!
                     }
                 }
             }
-            
-            console.log(`Collision check stats: Checked ${overlappingPixelChecks} pixel pairs, ` +
-                      `Attacker non-transparent: ${attackerNonTransparentCount}, ` +
-                      `Target non-transparent: ${targetNonTransparentCount}`);
-            
-            
+
+            console.log(`Collision check stats: Checked ${overlappingPixelChecks} world points.`);
             console.log('No pixel collision detected');
             return false; // No collision
         }
