@@ -161,6 +161,7 @@
         let keysPressed = {}; // Store pressed keys/buttons
         let activeMobileInputs = {}; // Track active pointer IDs for mobile buttons
         let backgroundSprite; // New global variable for background sprite
+        let gameStarted = false;
 
         // Initial player/opponent states
         const initialPlayerState = { jumping: false, velocityY: 0, attacking: false, attackType: 'punch', attackTimer: 0, lastAttackTime: 0, health: CONFIG.HEALTH.max, id: 'player', position: { x: -2 } };
@@ -295,17 +296,29 @@
             gameState = 'intro';
             Object.values(mobileButtons).forEach(btn => { btn.visible = false; });
 
-            player = createCharacter(CONFIG.CHARACTER.giColor, true);
-            player.position.set(0, 0.75, 0);
-            player.userData.introAnim = { kicking: true, legRotation: 0, returning: false };
-            scene.add(player);
-
+            // Create temporary character with startgame image
+            const tempTextureLoader = new THREE.TextureLoader();
+            const startgameTexture = tempTextureLoader.load('evelyn-startgame.png');
+            const introMaterial = new THREE.MeshBasicMaterial({
+                map: startgameTexture,
+                transparent: true,
+                side: THREE.DoubleSide
+            });
+            const aspectRatio = 2014/2097; // Original image aspect ratio
+            const height = 7; // Slightly smaller height for better fit
+            const introCharacter = new THREE.Mesh(
+                new THREE.PlaneGeometry(height * aspectRatio, height),
+                introMaterial
+            );
+            introCharacter.position.set(0, 1, 0);
+            scene.add(introCharacter);
+            
             const introLines = [
                 "Evelyn's Taekwondo Showdown:", "8th Birthday Party Edition", "",
                 "Get ready to kick it at UMAC Briarcliff!"
             ];
-            introText = createTextMesh(introLines.join('\n'), { x: 0, y: 3, z: 0 }, 0.8, true); // Adjusted scale/pos
-            introText.material.opacity = 0;
+            introText = createTextMesh(introLines.join('\n'), { x: 0, y: 1.5, z: 0 }, 0.8, true); // Changed y from 3 to 1.5
+            introText.material.opacity = 1; // Changed from 0 to 1 to make visible
             scene.add(introText);
 
             // Create a clickable HTML button instead of a 3D button
@@ -340,74 +353,55 @@
             // Store reference to remove it later
             startButton = startButtonHTML;
 
-            player.userData.introFadeInTimer = clock.getElapsedTime() + 0.1;
-            player.userData.introHoldTimer = 0;
-            player.userData.introFadeOutTimer = 0;
+            introCharacter.userData.introFadeInTimer = clock.getElapsedTime() + 0.1;
+            introCharacter.userData.introHoldTimer = 0;
+            introCharacter.userData.introFadeOutTimer = 0;
         }
 
         function startGameplay() {
+            // Clear any existing intro character
+            scene.children.forEach(child => {
+                if (child.userData && child.userData.introFadeInTimer !== undefined) {
+                    scene.remove(child);
+                }
+            });
+            
             clearScene();
-            console.log('Scene cleared for gameplay');
-            
-            // Remove HTML button if it exists (double-check)
-            const startFightButton = document.getElementById('startFightButton');
-            if (startFightButton) {
-                startFightButton.parentNode.removeChild(startFightButton);
-                console.log('Start fight button removed');
-            }
-            
             gameState = 'gameplay';
-            console.log('Game state set to:', gameState);
             
             // Reset game clock to ensure consistent timing for AI decisions
             clock = new THREE.Clock();
             
             document.getElementById('instructions').style.display = 'block';
-            console.log('Instructions displayed');
             
             // Start background music
             playBackgroundMusic();
 
             player = createCharacter(CONFIG.CHARACTER.giColor, false, false); // Player has no belt
             player.userData.originalColor = new THREE.Color(1, 1, 1); // Store original color for hit effect
-            console.log('Player character created');
             
             // Use the calculated ground level for initial position - player on left
             player.position.set(CONFIG.ARENA.playerStartX, CONFIG.CHARACTER.legLowerLength / 2, 0);
-            console.log('Player positioned at:', player.position.x, player.position.y, player.position.z);
             
             // Preserve the limb references by merging the initial state into the existing userData
             Object.assign(player.userData, initialPlayerState);
-            console.log('Player state initialized with textures:', 
-                        'Standing:', !!player.userData.standingTexture, 
-                        'Kick frames:', player.userData.kickTextures ? player.userData.kickTextures.length : 0);
             
             scene.add(player);
 
             opponent = createCharacter(CONFIG.CHARACTER.opponentGiColor, true, true); // Opponent has belt and is flipped
-            console.log('Opponent character created');
             
             // Use the calculated ground level for initial position - opponent on right
             opponent.position.set(CONFIG.ARENA.opponentStartX, CONFIG.CHARACTER.legLowerLength / 2, 0);
-            console.log('Opponent positioned at:', opponent.position.x, opponent.position.y, opponent.position.z);
             
             // Preserve the limb references by merging the initial state into the existing userData
             Object.assign(opponent.userData, initialOpponentState);
-            console.log('Opponent state initialized with textures:', 
-                        'Standing:', !!opponent.userData.standingTexture, 
-                        'Kick frames:', opponent.userData.kickTextures ? opponent.userData.kickTextures.length : 0);
-                        
+            
             // Set initial AI timing values
             const now = clock.getElapsedTime();
             opponent.userData.nextMoveTime = now + Math.random() * (CONFIG.AI.moveIntervalMax - CONFIG.AI.moveIntervalMin) / 1000 + CONFIG.AI.moveIntervalMin / 1000;
             opponent.userData.nextAttackTime = now + Math.random() * (CONFIG.AI.attackIntervalMax - CONFIG.AI.attackIntervalMin) / 1000 + CONFIG.AI.attackIntervalMin / 1000;
             opponent.userData.nextJumpTime = now + 1 + Math.random() * 2; // First jump decision in 1-3 seconds
             
-            // Debug log
-            console.log('Opponent AI initialized with timing:', 
-                        'Next move:', opponent.userData.nextMoveTime - now, 
-                        'Next attack:', opponent.userData.nextAttackTime - now,
-                        'Next jump:', opponent.userData.nextJumpTime - now);
             scene.add(opponent);
 
             // Create HTML-based health bars instead of Three.js objects
@@ -497,7 +491,6 @@
             
             // Set character ID
             group.userData.id = isOpponent ? 'opponent' : 'player';
-            console.log(`Creating character: ${group.userData.id}`);
             
             // Initialize AI-specific properties for opponent
             if (isOpponent) {
@@ -959,7 +952,7 @@
             }
             const now = clock.getElapsedTime();
             
-            console.log(`Attack input for ${characterId}: currentState=${gameState}, isKicking=${char.userData.isKicking}, currentKickFrame=${char.userData.currentKickFrame}, cooldown=${((now - char.userData.lastAttackTime) * 1000).toFixed(0)}ms`);
+            console.log(`Attack input for ${characterId}: currentState=${gameState}, isKicking=${char.userData.isKicking}, currentKickFrame=${char.userData.currentKickFrame || 0}, cooldown=${((now - char.userData.lastAttackTime) * 1000).toFixed(0)}ms`);
 
             // Ensure we can attack if not currently kicking, regardless of attacking state
             // This fixes the issue where attacking state might be out of sync
@@ -1230,7 +1223,7 @@
                         const potentialDistance = Math.abs(newX - player.position.x);
                         
                         if (potentialDistance < minDistance) {
-                            console.log(`Opponent collision prevented: would be too close to player (${potentialDistance.toFixed(2)} < ${minDistance.toFixed(2)})`);
+                            console.log(`Collision prevented: opponent and player would be too close (${potentialDistance.toFixed(2)} < ${minDistance.toFixed(2)})`);
                             canMove = false;
                             
                             // Position opponent at the maximum allowed distance
@@ -1307,7 +1300,7 @@
             console.log(`Attack check: ${attacker.userData.id} (${attackType}) -> ${target.userData.id}, distance: ${distance.toFixed(2)}, reach: ${reach}, already hit: ${attacker.userData.hitThisAttack || false}`);
             
             // Debug hit detection
-            console.log(`Hit detection details: attacker position: ${attacker.position.x.toFixed(2)}, target position: ${target.position.x.toFixed(2)}`);
+            console.log('Hit detection details: attacker position: ${attacker.position.x.toFixed(2)}, target position: ${target.position.x.toFixed(2)}');
             console.log(`Attacker state: attacking=${attacker.userData.attacking}, isKicking=${attacker.userData.isKicking}, currentKickFrame=${attacker.userData.currentKickFrame || 0}`);
             
             
