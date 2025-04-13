@@ -96,8 +96,8 @@
                 maxJumpHeight: 2.0, // Increased maximum jump height
             },
             ATTACK: {
-                punchReach: 1.2, punchDamage: 10, punchDuration: 300,
-                kickReach: 3.0, kickDamage: 15, kickDuration: 500, // Increased reach to allow kicks to connect at safe distance
+                punchReach: 1.2, punchDamage: 1, punchDuration: 300,
+                kickReach: 3.0, kickDamage: 2, kickDuration: 500, // Increased reach to allow kicks to connect at safe distance
                 cooldown: 0, // Reduced cooldown for more responsive attacks
             },
             AI: {
@@ -500,7 +500,7 @@
             
             // Load textures
             const textureLoader = new THREE.TextureLoader();
-            const standingTexture = textureLoader.load('assets/images/evelyn-standing.png', texture => {
+            const standingTexture = textureLoader.load('assets/images/evelyn-walking-001.png', texture => {
                 // Create a canvas to extract pixel data for collision detection
                 extractTextureData(texture, 'standing');
             });
@@ -899,6 +899,9 @@
 
              let stillOnButton = false;
              if (intersectsUI.length > 0) {
+                 const button = intersectsUI[0].object;
+                 const action = button.userData.action;
+
                  if(intersectsUI[0].object.userData.action === activeMobileInputs[event.pointerId]) {
                     stillOnButton = true;
                  }
@@ -991,52 +994,112 @@
                     CONFIG.ATTACK.punchDuration : CONFIG.ATTACK.kickDuration;
                 char.userData.lastAttackTime = now;
             } else {
-                console.log(`Attack input rejected: ${!char.userData.isKicking ? '' : 'still kicking, '} ${gameState !== 'gameplay' ? 'not in gameplay, ' : ''} ${(now - char.userData.lastAttackTime <= CONFIG.ATTACK.cooldown / 1000) ? 'cooldown active' : ''}`);
+                // console.log(`Attack input rejected: ${!char.userData.isKicking ? '' : 'still kicking, '} ${gameState !== 'gameplay' ? 'not in gameplay, ' : ''} ${(now - char.userData.lastAttackTime <= CONFIG.ATTACK.cooldown / 1000) ? 'cooldown active' : ''}`);
             }
         }
 
         // --- Game Logic ---
-         function updatePlayer(deltaTime) {
-             if (gameState !== 'gameplay' || !player) return;
+        function updatePlayer(deltaTime) {
+            if (gameState !== 'gameplay' || !player) return;
             
+            // Get current time for animation debugging
+            const now = clock.getElapsedTime();
+            
+            // Process movement input
             let moveDirection = 0;
-            if (keysPressed['ArrowLeft']) moveDirection -= 1;
-            if (keysPressed['ArrowRight']) moveDirection += 1;
+            if (keysPressed['ArrowLeft'] || keysPressed['a']) moveDirection -= 1;
+            if (keysPressed['ArrowRight'] || keysPressed['d']) moveDirection += 1;
             if (activeMobileInputs['left']) moveDirection -= 1;
             if (activeMobileInputs['right']) moveDirection += 1;
             
-            if (moveDirection !== 0 && !player.userData.attacking) {
-                const newX = player.position.x + moveDirection * CONFIG.MOVEMENT.speed;
+            // First time initialization of walking animation system
+            if (!player.userData.walkingAnimationInitialized && !player.userData.attacking) {
+                console.log('[WALKING ANIM] Initializing walking animation system');
                 
-                // Check boundaries
-                if (newX - CHARACTER_HALF_WIDTH > SCREEN_LEFT && 
-                    newX + CHARACTER_HALF_WIDTH < SCREEN_RIGHT) {
+                // Create and store all walking textures directly
+                player.userData.walkingTextures = [];
+                
+                // Load all textures directly (no promises or async)
+                for (let i = 1; i <= 10; i++) {
+                    const paddedIndex = i.toString().padStart(3, '0');
+                    const filename = `assets/images/evelyn-walking-${paddedIndex}.png`;
                     
-                    // Check collision with opponent
-                    if (opponent) {
-                        const minDistance = CHARACTER_HALF_WIDTH * 1.5; // Minimum distance between characters
-                        const potentialDistance = Math.abs(newX - opponent.position.x);
-                        
-                        if (potentialDistance < minDistance) {
-                            console.log(`Collision prevented: player and opponent would be too close (${potentialDistance.toFixed(2)} < ${minDistance.toFixed(2)})`);
-                            // Position player at the maximum allowed distance
-                            if (newX < opponent.position.x) {
-                                // Player is to the left of opponent
-                                player.position.x = opponent.position.x - minDistance;
-                            } else {
-                                // Player is to the right of opponent
-                                player.position.x = opponent.position.x + minDistance;
-                            }
-                        } else {
-                            player.position.x = newX;
-                        }
-                    } else {
-                        player.position.x = newX;
-                    }
+                    // Create texture and add to array
+                    const texture = new THREE.TextureLoader().load(filename);
+                    player.userData.walkingTextures.push(texture);
+                    
+                    console.log(`[WALKING ANIM] Directly loaded texture ${i}: ${filename}`);
                 }
+                
+                // Initialize animation variables
+                player.userData.walkingAnimationInitialized = true;
+                player.userData.currentWalkingFrame = 0;
+                player.userData.walkingTimer = 0;
+                player.userData.isWalking = false;
+                player.userData.walkingDirection = 0;
+                player.userData.standingTexture = player.userData.walkingTextures[0];
+                
+                console.log('[WALKING ANIM] Walking animation system initialized with', 
+                           player.userData.walkingTextures.length, 'textures');
             }
             
-            // Handle jumping physics
+            // 1. Determine move direction (Removed duplicate declaration)
+            moveDirection = 0; // Assign to existing variable
+            if (keysPressed['ArrowLeft'] || keysPressed['a'] || keysPressed['MobileLeft']) moveDirection -= 1;
+            if (keysPressed['ArrowRight'] || keysPressed['d'] || keysPressed['MobileRight']) moveDirection += 1;
+
+            // 2. Determine walking state for THIS frame (can't walk while attacking or jumping)
+            const shouldBeWalking = (moveDirection !== 0 && !player.userData.attacking && !player.userData.jumping);
+
+            // 3. Update walking state and log changes
+            if (shouldBeWalking && (!player.userData.isWalking || player.userData.walkingDirection !== moveDirection)) {
+                player.userData.isWalking = true;
+                player.userData.walkingDirection = moveDirection;
+                // Reset frame index when starting to walk or changing direction
+                player.userData.currentWalkingFrame = 0;
+                player.userData.walkingTimer = 0;
+                console.log(`[WALKING ANIM] Started walking in direction: ${moveDirection}`);
+            } else if (!shouldBeWalking && player.userData.isWalking) {
+                // Set intent to stop walking, animation function will handle texture reset
+                player.userData.isWalking = false;
+                player.userData.walkingDirection = 0;
+                console.log('[WALKING ANIM] Stopped walking intent');
+            }
+
+            // 4. Apply movement if walking state is true
+            if (player.userData.isWalking) {
+                const newX = player.position.x + player.userData.walkingDirection * CONFIG.MOVEMENT.speed;
+
+                // Check boundaries
+                let finalX = newX;
+                if (newX - CHARACTER_HALF_WIDTH <= SCREEN_LEFT) {
+                    finalX = SCREEN_LEFT + CHARACTER_HALF_WIDTH;
+                } else if (newX + CHARACTER_HALF_WIDTH >= SCREEN_RIGHT) {
+                    finalX = SCREEN_RIGHT - CHARACTER_HALF_WIDTH;
+                }
+
+                // Check collision with opponent
+                if (opponent) {
+                    const minDistance = CHARACTER_HALF_WIDTH * 1.5; // Minimum distance between characters
+                    const potentialDistance = Math.abs(finalX - opponent.position.x);
+
+                    if (potentialDistance < minDistance) {
+                        console.log(`Collision prevented: player would be too close to opponent (${potentialDistance.toFixed(2)} < ${minDistance.toFixed(2)})`);
+                        
+                        // Prevent player from moving through opponent by adjusting finalX
+                        if (finalX < opponent.position.x) {
+                            // Player is to the left of opponent
+                            finalX = opponent.position.x - minDistance;
+                        } else {
+                            // Player is to the right of opponent
+                            finalX = opponent.position.x + minDistance;
+                        }
+                    }
+                }
+                player.position.x = finalX;
+            }
+
+            // 5. Handle jumping physics
             if (player.userData.jumping) {
                 // Apply gravity (scale with deltaTime for consistent behavior)
                 player.userData.velocityY -= CONFIG.MOVEMENT.gravity * deltaTime * 60;
@@ -1053,10 +1116,11 @@
                     player.position.y = CONFIG.CHARACTER.legLowerLength / 2;
                     player.userData.jumping = false;
                     player.userData.velocityY = 0;
-                    
-                    // Explicitly reset to standing texture on landing
-                    player.userData.body.material.map = player.userData.standingTexture;
-                    player.userData.body.material.needsUpdate = true;
+                    // If landing while move keys are released, ensure walking stops
+                    if (moveDirection === 0) {
+                        player.userData.isWalking = false;
+                    }
+                    // Standing texture reset is handled by updateWalkingAnimation or below
                 } else {
                     player.position.y = newY;
                 }
@@ -1081,6 +1145,21 @@
                 player.userData.attacking = false;
             }
             
+            // 6. Attack handling (unchanged from original logic)
+            if (player.userData.attacking) {
+                player.userData.attackTimer -= deltaTime * 1000;
+                if (player.userData.attackTimer <= 0) {
+                    player.userData.attacking = false;
+                    player.userData.hitThisAttack = false;
+                    if (opponent && player.userData.attackType === 'punch') {
+                        checkAttackHit(player, opponent);
+                    }
+                }
+            }
+            if (!player.userData.isKicking && player.userData.attacking) {
+                 player.userData.attacking = false; // Ensure consistency
+            }
+
             updateHealthBar(true, player.userData.health);
         }
 
@@ -1210,29 +1289,27 @@
             
             // Calculate potential new position - only move when not jumping or attacking
             if (!opponent.userData.jumping && !opponent.userData.attacking) {
-                const newX = opponent.position.x + opponent.userData.moveDirection * CONFIG.MOVEMENT.speed * 0.7;
+                let newX = opponent.position.x + opponent.userData.moveDirection * CONFIG.MOVEMENT.speed * 0.7;
                 
                 // Check boundaries
                 if (newX - CHARACTER_HALF_WIDTH > SCREEN_LEFT && 
                     newX + CHARACTER_HALF_WIDTH < SCREEN_RIGHT) {
                     
                     // Check if this would cause collision with player
-                    let canMove = true;
                     if (player) {
                         const minDistance = CHARACTER_HALF_WIDTH * 1.5; // Minimum distance between characters
                         const potentialDistance = Math.abs(newX - player.position.x);
-                        
+
                         if (potentialDistance < minDistance) {
-                            console.log(`Collision prevented: opponent and player would be too close (${potentialDistance.toFixed(2)} < ${minDistance.toFixed(2)})`);
-                            canMove = false;
+                            console.log(`Collision prevented: opponent would be too close to player (${potentialDistance.toFixed(2)} < ${minDistance.toFixed(2)})`); 
                             
-                            // Position opponent at the maximum allowed distance
+                            // Adjust opponent position to maintain minimum distance
                             if (newX < player.position.x) {
                                 // Opponent is to the left of player
-                                opponent.position.x = player.position.x - minDistance;
+                                newX = player.position.x - minDistance;
                             } else {
                                 // Opponent is to the right of player
-                                opponent.position.x = player.position.x + minDistance;
+                                newX = player.position.x + minDistance;
                             }
                             
                             // Reverse direction when blocked by player
@@ -1240,9 +1317,8 @@
                         }
                     }
                     
-                    if (canMove) {
-                        opponent.position.x = newX;
-                    }
+                    // Apply the adjusted position
+                    opponent.position.x = newX;
                 } else {
                     // Reverse direction if hitting boundary
                     opponent.userData.moveDirection *= -1;
@@ -1493,6 +1569,62 @@
                 character.userData.body.material.needsUpdate = true;
             }
         }
+        
+        // New function for walking animation using the same approach as kick animation
+        function updateWalkingAnimation(character, deltaTime) {
+            if (!character || !character.userData || !character.userData.body || !character.userData.walkingTextures || character.userData.walkingTextures.length === 0) {
+                //console.log('[WALKING ANIM] Update skipped: Missing data or textures');
+                return;
+            }
+
+            // Reset to standing if not walking, jumping, or kicking
+            if (!character.userData.isWalking && !character.userData.jumping && !character.userData.isKicking) {
+                if (character.userData.body.material.map !== character.userData.standingTexture) {
+                    character.userData.body.material.map = character.userData.standingTexture;
+                    character.userData.body.material.needsUpdate = true;
+                    console.log(`[WALKING ANIM] ${character.userData.id} reset to standing`);
+                }
+                return; // Exit if not walking
+            }
+
+            // Only proceed if actually walking
+            if (character.userData.isWalking) {
+                // Update animation timer
+                character.userData.walkingTimer = (character.userData.walkingTimer || 0) + deltaTime;
+                
+                // Update frame every 100ms (10fps)
+                if (character.userData.walkingTimer >= 0.1) {
+                    character.userData.walkingTimer = 0;
+                    
+                    // Get current frame and calculate next frame
+                    const currentFrame = character.userData.currentWalkingFrame || 0;
+                    const nextFrame = (currentFrame + 1) % character.userData.walkingTextures.length;
+                    
+                    // Update frame counter
+                    character.userData.currentWalkingFrame = nextFrame;
+                    
+                    console.log(`[WALKING ANIM] Character ${character.userData.id} walking frame: ${nextFrame+1}/${character.userData.walkingTextures.length}, texture available: ${!!character.userData.walkingTextures[nextFrame]}`);
+                    
+                    // Apply the texture
+                    if (character.userData.walkingTextures && character.userData.walkingTextures.length > 0) {
+                        character.userData.body.material.map = character.userData.walkingTextures[nextFrame];
+                        character.userData.body.material.needsUpdate = true;
+                    }
+                    
+                    // IMPORTANT: Always make character face the opponent regardless of walking direction
+                    const opponent = character.userData.id === 'player' ? window.opponent : window.player;
+                    if (opponent) {
+                        // Determine if opponent is to the left or right
+                        const facingDirection = opponent.position.x > character.position.x ? 1 : -1;
+                        
+                        // Set scale.x to make character face the opponent - DO NOT change this based on walking direction
+                        character.userData.body.scale.x = facingDirection;
+                        
+                        console.log(`[WALKING ANIM] ${character.userData.id} facing direction: ${facingDirection}, opponent at: ${opponent.position.x.toFixed(2)}, character at: ${character.position.x.toFixed(2)}`);
+                    }
+                }
+            }
+        }
 
         // Added targetCharacter parameter
         function updateKickAnimation(player, deltaTime, targetCharacter) {
@@ -1567,18 +1699,23 @@
             if (gameState === 'intro') updateIntroAnimation(deltaTime);
             if (gameState === 'ending') updateEndingAnimation(deltaTime);
 
-            // Update kick animations - IMPORTANT: Process kick animations BEFORE jump animations
+            // Update kick animations before walking animations (prioritizes kicks)
             // Pass the correct target character
-            if (player) updateKickAnimation(player, deltaTime, opponent);
-            if (opponent) updateKickAnimation(opponent, deltaTime, player);
-
-            // Update jump animations AFTER kick animations
-            if (player && !player.userData.isKicking) updateJumpAnimation(player, deltaTime);
-            if (opponent && !opponent.userData.isKicking) updateJumpAnimation(opponent, deltaTime);
-
+            if (player && player.userData.isKicking) updateKickAnimation(player, deltaTime, opponent);
+            if (opponent && opponent.userData.isKicking) updateKickAnimation(opponent, deltaTime, player);
+            
+            // Update jump animations after kick animations
+            if (player && player.userData.jumping) updateJumpAnimation(player, deltaTime);
+            if (opponent && opponent.userData.jumping) updateJumpAnimation(opponent, deltaTime);
+            
+            // Update Walking Animations (AFTER jump/kick, BEFORE render)
+            // Always update walking animation to ensure it's properly called
+            if (player) updateWalkingAnimation(player, deltaTime);
+            if (opponent) updateWalkingAnimation(opponent, deltaTime);
+            
             // Update gameplay logic only in gameplay state
             if (gameState === 'gameplay') {
-                updatePlayer(deltaTime);
+                updatePlayer(deltaTime); // Determines player state (like isWalking)
                 updateOpponent(deltaTime);
             }
 
@@ -1770,11 +1907,9 @@
                 
                 // Determine which direction to extend based on character orientation
                 // For opponent (who is flipped), we need to reverse the direction
-                // Debug orientation
                 console.log(`Extending kick box: attacker=${attacker.userData.id}, positions: attacker=${attacker.position.x.toFixed(2)}, target=${target.position.x.toFixed(2)}`);
                 
-                if ((attacker.userData.id === 'player' && attacker.position.x < target.position.x) ||
-                    (attacker.userData.id === 'opponent' && attacker.position.x > target.position.x)) {
+                if ((attacker.position.x < target.position.x)) {
                     // Extend right
                     overlapCheckAttackerRight = origAttackerRight + extendAmount;
                     console.log(`Extended kick bounding box RIGHT: L=${overlapCheckAttackerLeft.toFixed(2)}, R=${overlapCheckAttackerRight.toFixed(2)}`);
