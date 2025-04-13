@@ -1351,67 +1351,89 @@
             // For kicks, we check during the kick animation, not just when attacking flag is set
             if (!attacker || !target || !attacker.userData || !target.userData) {
                 console.log('Hit check failed: missing character data');
-                return;
+                return false;
             }
             
             // Make sure we're either attacking or kicking
             if (!attacker.userData.attacking && !attacker.userData.isKicking) {
                 console.log('Hit check failed: character not attacking or kicking');
-                return;
+                return false;
             }
             
-            // Initialize hitThisAttack if it doesn't exist
+            // Initialize all tracking objects if they don't exist
             if (attacker.userData.hitThisAttack === undefined) {
                 attacker.userData.hitThisAttack = false;
-                console.log(`Initialized hitThisAttack for ${attacker.userData.id}`);
             }
-
-            const attackType = attacker.userData.attackType;
+            
+            if (!attacker.userData.hitThisFrame) {
+                attacker.userData.hitThisFrame = {};
+            }
+            
+            if (!attacker.userData.hitByFrame) {
+                attacker.userData.hitByFrame = {};
+            }
+            
+            // Make sure attackType is properly set for both characters
+            const attackType = attacker.userData.isKicking ? 'kick' : (attacker.userData.attackType || 'punch');
+            
+            // Ensure both characters use the same damage values regardless of who is attacking
             const damage = (attackType === 'punch') ? CONFIG.ATTACK.punchDamage : CONFIG.ATTACK.kickDamage;
-
+            
+            // Get current animation frame for kicks
+            const currentFrame = attacker.userData.currentKickFrame || 0;
+            
             // Calculate distance based on X and Y only, ignoring Z
             const dx = attacker.position.x - target.position.x;
             const dy = attacker.position.y - target.position.y;
             const distance = Math.sqrt(dx * dx + dy * dy);
             const reach = (attackType === 'punch') ? CONFIG.ATTACK.punchReach : CONFIG.ATTACK.kickReach;
             
-            console.log(`Attack check: ${attacker.userData.id} (${attackType}) -> ${target.userData.id}, distance (2D): ${distance.toFixed(2)}, reach: ${reach}, already hit: ${attacker.userData.hitThisAttack || false}`);
+            console.log(`Attack check: ${attacker.userData.id} (${attackType}) -> ${target.userData.id}, distance: ${distance.toFixed(2)}, reach: ${reach}, frame: ${currentFrame}`);
+            console.log(`Hit tracking: hitThisAttack=${attacker.userData.hitThisAttack}, hitByFrame[${currentFrame}]=${attacker.userData.hitByFrame[currentFrame]}`);
             
-            // Debug hit detection
-            console.log('Hit detection details: attacker position: ${attacker.position.x.toFixed(2)}, target position: ${target.position.x.toFixed(2)}');
-            console.log(`Attacker state: attacking=${attacker.userData.attacking}, isKicking=${attacker.userData.isKicking}, currentKickFrame=${attacker.userData.currentKickFrame || 0}`);
+            // For kicks, use frame-specific hit tracking; for punches, use the global hitThisAttack flag
+            const canAttemptHit = attacker.userData.isKicking ? 
+                !attacker.userData.hitByFrame[currentFrame] : 
+                !attacker.userData.hitThisAttack;
             
-            
-            if (distance < reach && !attacker.userData.hitThisAttack) {
+            // Only proceed if we haven't hit on this attack/frame yet and we're within reach
+            if (distance < reach && canAttemptHit) {
                 console.log('Distance check passed, performing collision detection');
                 
                 // For kicks, check if we're in the right animation frames for a hit (frames 3-9 are the extended kick)
                 let canHit = true;
                 if (attackType === 'kick' && attacker.userData.isKicking) {
-                    canHit = attacker.userData.currentKickFrame >= 3 && attacker.userData.currentKickFrame <= 9;
-                    console.log(`Kick frame check: ${attacker.userData.currentKickFrame}, can hit: ${canHit}`);
+                    canHit = currentFrame >= 3 && currentFrame <= 9;
+                    console.log(`Kick frame check: ${currentFrame}, can hit: ${canHit}`);
                 }
                 
                 if (canHit) {
                     // Use pixel-based collision detection
                     if (detectPixelCollision(attacker, target)) {
-                        console.log('Pixel collision detected - registering hit!');
+                        console.log(`HIT CONFIRMED: ${attacker.userData.id} hit ${target.userData.id} with ${attackType} for ${damage} damage on frame ${currentFrame}!`);
 
-                        // Hit detected!
+                        // Apply damage
                         target.userData.health -= damage;
                         target.userData.health = Math.max(0, target.userData.health);
-                        attacker.userData.hitThisAttack = true; // Mark hit for this attack sequence
-                        target.userData.lastHitTime = clock.getElapsedTime(); // Record hit time
                         
-                        console.log(`HIT CONFIRMED: ${attacker.userData.id} hit ${target.userData.id} with ${attackType} for ${damage} damage!`);
+                        // Update hit tracking - use frame-specific tracking for kicks
+                        if (attacker.userData.isKicking) {
+                            // Mark this specific frame as having hit
+                            attacker.userData.hitByFrame[currentFrame] = true;
+                            attacker.userData.hitThisFrame[currentFrame] = true;
+                            console.log(`Frame-specific hit registered for ${attacker.userData.id} on frame ${currentFrame}`);
+                        } 
+                        
+                        // Always mark the global hit flag for both kick and punch
+                        attacker.userData.hitThisAttack = true;
+                        
+                        target.userData.lastHitTime = clock.getElapsedTime(); // Record hit time
                         
                         // Visual feedback for hit
                         showHitEffect(target);
                         
                         // Update health bar
                         updateHealthBar(target.userData.id === 'player', target.userData.health);
-
-                        console.log(`${attacker.userData.id} hit ${target.userData.id} (${attackType}). ${target.userData.id} health: ${target.userData.health}`);
 
                         // Check for win/loss condition
                         if (target.userData.health <= 0) {
@@ -1424,11 +1446,15 @@
                                 setupEnding(); 
                             }
                         }
+                        
+                        return true; // Hit was successful
                     } else {
                         console.log('No pixel collision detected - attack missed');
                     }
                 }
             }
+            
+            return false; // No hit occurred
         }
 
         // Visual feedback for hit detection
@@ -1632,6 +1658,10 @@
                 return;
             }
 
+            // Initialize tracking objects if they don't exist
+            if (!player.userData.hitThisFrame) player.userData.hitThisFrame = {};
+            if (!player.userData.hitByFrame) player.userData.hitByFrame = {};
+
             // Debug kick animation state if needed
             if (player.userData.id === 'opponent' && player.userData.isKicking && !player.userData.kickDebugLogged) {
                 console.log('Opponent kick animation active:', {
@@ -1648,7 +1678,18 @@
                 // Update frame every 50ms (20fps)
                 if (player.userData.kickTimer >= 0.05) {
                     player.userData.kickTimer = 0;
+                    
+                    // Store previous frame for comparison
+                    const previousFrame = player.userData.currentKickFrame;
                     player.userData.currentKickFrame++;
+                    
+                    // Reset hit tracking at the start of animation
+                    if (player.userData.currentKickFrame === 1) {
+                        console.log(`Resetting hit tracking at start of kick animation for ${player.userData.id}`);
+                        player.userData.hitThisAttack = false;
+                        player.userData.hitByFrame = {};
+                        player.userData.hitThisFrame = {};
+                    }
                     
                     console.log(`${player.userData.id} kick frame: ${player.userData.currentKickFrame}/${player.userData.kickTextures.length}`);
                     
@@ -1662,12 +1703,25 @@
                         // This ensures hit detection works throughout the animation
                         player.userData.attacking = true;
                         
-                        // Check for hits on frames where the kick is extended (frames 3-9)
-                        if (player.userData.currentKickFrame >= 3 && player.userData.currentKickFrame <= 9) {
+                        // Check for hits on frames 3-7 which are the active kick frames
+                        // This ensures more consistent hit opportunities
+                        if (player.userData.currentKickFrame >= 3 && player.userData.currentKickFrame <= 7) {
                             console.log(`${player.userData.id} checking for kick hit on frame ${player.userData.currentKickFrame}`);
+                            
                             // Check for hit using the passed targetCharacter
                             if (targetCharacter) {
-                                checkAttackHit(player, targetCharacter);
+                                // Only check for hit once per specific frame
+                                if (!player.userData.hitThisFrame[player.userData.currentKickFrame]) {
+                                    console.log(`${player.userData.id} performing hit check on frame ${player.userData.currentKickFrame}`);
+                                    const hitLanded = checkAttackHit(player, targetCharacter);
+                                    
+                                    // Mark this frame as checked regardless of hit result
+                                    player.userData.hitThisFrame[player.userData.currentKickFrame] = true;
+                                    
+                                    if (hitLanded) {
+                                        console.log(`Hit landed for ${player.userData.id} on frame ${player.userData.currentKickFrame}`);
+                                    }
+                                }
                             }
                         }
                     } else {
@@ -1678,6 +1732,12 @@
                         player.userData.body.material.map = player.userData.standingTexture;
                         player.userData.body.material.needsUpdate = true;
                         player.userData.kickDebugLogged = false; // Reset debug flag
+                        
+                        // Reset ALL hit tracking flags
+                        player.userData.hitThisAttack = false;
+                        player.userData.hitByFrame = {};
+                        player.userData.hitThisFrame = {};
+                        console.log(`Complete hit tracking reset for ${player.userData.id} at end of animation`);
                     }
                 }
             }
