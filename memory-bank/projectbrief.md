@@ -2,14 +2,36 @@
 
 ## Core Requirements & Goals
 
-*   **Objective:** Create a simple 2D fighting game featuring Evelyn.
-*   **Gameplay:** Basic movement (left/right), jumping, and kicking. Opponent AI is not initially required.
-*   **Visuals:** Use the provided sprites for Evelyn and a background image.
-*   **Technology:** To be determined (Initial files suggest Python backend and HTML/JS frontend).
+* **Objective:** Create a 2D fighting game featuring Evelyn for her birthday party
+* **Gameplay:**
+  - Player controls Evelyn with keyboard/mobile controls
+  - Opponent AI with attack patterns
+  - Health bars and combat system
+  - Victory/defeat conditions
+* **Visuals:**
+  - Animated sprites for Evelyn
+  - Dojo background
+  - Confetti effects for victory
+* **Technology:**
+  - Client-side Three.js implementation
+  - HTML/CSS for UI elements
+  - HTML5 Audio for sound
 
 ## Scope
 
-*   **Initial Focus:** Get a single character (Evelyn) controllable on screen with basic animations (standing, jumping, kicking) against a static background.
-*   **Future Considerations:** Opponent character, health bars, scoring, sound effects, different stages.
+* **Implemented Features:**
+  - Character movement (left/right, jump)
+  - Attack system (punch/kick)
+  - Opponent AI with movement and attack patterns
+  - Health bars and damage system
+  - Mobile touch controls
+  - Background music and sound effects
+  - Victory celebration with confetti
+  - Intro and ending screens
+
+* **Future Considerations:**
+  - Additional character animations
+  - More complex AI behaviors
+  - Multiple stages/backgrounds
 
 *(This is the foundational document. All other Memory Bank files build upon this.)*

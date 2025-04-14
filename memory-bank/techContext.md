@@ -1,25 +1,39 @@
 # Tech Context: Evelyn's Taekwondo Showdown
 
-## Technologies Used (Inferred)
+## Technologies Used
 
-*   **Frontend:** HTML, potentially CSS and JavaScript (inferred from `index.html`). The specific JS libraries or frameworks are unknown.
-*   **Backend/Server:** Python (inferred from `server.py` and `requirements.txt`). The specific Python framework (e.g., Flask, Django, or standard library http.server) is unknown.
-*   **Assets:** PNG images for sprites, JPG for background, MP3 for audio.
+* **Frontend:**
+  - Three.js for 3D rendering
+  - HTML5 Canvas for display
+  - CSS for UI styling
+  - JavaScript for game logic
+* **Assets:**
+  - PNG sprite sheets for character animations
+  - JPG for background image
+  - MP3 for audio (music and effects)
 
-## Development Setup (Assumed)
+## Development Setup
 
-*   A Python environment is likely needed to run `server.py`. Dependencies are listed in `requirements.txt`.
-*   A web browser is required to view and interact with `index.html`.
-*   Code Editor: VS Code (based on environment details).
+* **Local Server:** Python http.server for development
+* **Browser Requirements:**
+  - WebGL support for Three.js
+  - AudioContext support for sound
+* **Code Editor:** VS Code with web development tools
 
 ## Technical Constraints
 
-*   Must run in a standard web browser.
-*   Asset loading and performance might be considerations depending on the implementation complexity.
+* Must run in modern browsers (Chrome, Firefox, Safari)
+* Mobile-friendly touch controls
+* Performance optimization for sprite animations
+* Audio must work on mobile devices
 
 ## Dependencies
 
-*   **Python:** Specified in `requirements.txt`. Need to inspect this file to know the exact dependencies.
-*   **JavaScript:** Unknown. Need to inspect `index.html` for `<script>` tags or linked JS files.
+* **JavaScript:**
+  - Three.js (r134)
+  - No other external libraries
+* **Python:**
+  - Only standard library modules used
+  - No additional packages required
 
 *(This file details the technologies involved, based on initial file analysis.)*
