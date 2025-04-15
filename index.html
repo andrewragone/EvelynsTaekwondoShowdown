@@ -2288,6 +2288,22 @@
         function setupHTMLMobileControls() {
             const mobileControls = document.getElementById('mobile-controls');
             
+            // More reliable mobile detection - force desktop to hide controls
+            const isMobileDevice = ('ontouchstart' in window) || 
+                                  (navigator.maxTouchPoints > 0) || 
+                                  /Android|iPhone|iPad|iPod|IEMobile|Opera Mini/i.test(navigator.userAgent);
+            
+            // Force hide controls on desktop browsers
+            if (!isMobileDevice) {
+                mobileControls.style.display = 'none';
+                // Also add a style to ensure it's really hidden
+                mobileControls.style.visibility = 'hidden';
+                mobileControls.style.opacity = '0';
+                mobileControls.style.pointerEvents = 'none';
+                console.log('Desktop browser detected, mobile controls disabled');
+                return;
+            }
+            
             // Left button - move left
             document.getElementById('btn-left').addEventListener('touchstart', function(e) {
                 e.preventDefault();
@@ -2353,6 +2369,8 @@
             
             // Monitor gameState changes to update visibility
             setInterval(updateMobileControlsVisibility, 500);
+            
+            console.log('Mobile device detected, mobile controls enabled');
         }
         
         // --- Start ---
