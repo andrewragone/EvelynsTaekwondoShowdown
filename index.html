@@ -50,12 +50,56 @@
         #opponent-health-bar-fill {
             transform-origin: left center;
         }
+        
+        /* Mobile control buttons */
+        .mobile-control {
+            position: fixed;
+            width: 60px;
+            height: 60px;
+            border-radius: 50%;
+            background-color: rgba(255, 255, 255, 0.5);
+            border: 3px solid rgba(0, 0, 0, 0.8);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 24px;
+            font-weight: bold;
+            color: #000;
+            user-select: none;
+            -webkit-user-select: none;
+            z-index: 1000;
+            touch-action: manipulation;
+        }
+        
+        /* Left side controls */
+        #btn-left {
+            bottom: 20px;
+            left: 20px;
+        }
+        #btn-right {
+            bottom: 20px;
+            left: 90px;
+        }
+        #btn-jump {
+            bottom: 90px;
+            left: 55px;
+        }
+        
+        /* Right side controls */
+        #btn-punch {
+            bottom: 20px;
+            right: 20px;
+        }
+        #btn-kick {
+            bottom: 20px;
+            right: 90px;
+        }
     </style>
 </head>
 <body>
     <div id="instructions">
         Desktop: Arrow Keys (Move/Jump), Spacebar (Attack)<br>
-        Mobile: Use On-Screen Buttons
+        Mobile: Left side - movement arrows, Right side - attack buttons
     </div>
     <div id="player-health-bar" class="health-bar">
         <div id="player-health-bar-fill" class="health-bar-fill"></div>
@@ -63,6 +107,19 @@
     <div id="opponent-health-bar" class="health-bar">
         <div id="opponent-health-bar-fill" class="health-bar-fill"></div>
     </div>
+    
+    <!-- Mobile Controls -->
+    <div id="mobile-controls" style="display: none;">
+        <!-- Left side controls -->
+        <div id="btn-left" class="mobile-control">←</div>
+        <div id="btn-right" class="mobile-control">→</div>
+        <div id="btn-jump" class="mobile-control">↑</div>
+        
+        <!-- Right side controls -->
+        <div id="btn-punch" class="mobile-control">P</div>
+        <div id="btn-kick" class="mobile-control">K</div>
+    </div>
+    
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r134/three.min.js"></script>
     <script>
         // --- Configuration ---
@@ -116,8 +173,8 @@
                 fontColor: 'white',
                 outlineColor: 'black',
                 buttonWidth: 1.5, buttonHeight: 0.5,
-                mobileButtonSize: 0.8,
-                mobileButtonOpacity: 0.7,
+                mobileButtonSize: 1.0, // Increased from 0.8 for better touch targets
+                mobileButtonOpacity: 0.9, // Increased from 0.7 for better visibility
             },
             COLORS: {
                 introBg: 0x87ceeb,
@@ -373,6 +430,7 @@
             clock = new THREE.Clock();
             
             document.getElementById('instructions').style.display = 'block';
+    document.getElementById('mobile-controls').style.display = 'block'; // Show mobile controls
             
             // Start background music
             playBackgroundMusic();
@@ -701,21 +759,66 @@
                 canvas.width = 64; canvas.height = 64;
                 const ctx = canvas.getContext('2d');
 
-                ctx.fillStyle = `rgba(${Math.floor(color >> 16 & 255)}, ${Math.floor(color >> 8 & 255)}, ${Math.floor(color & 255)}, ${opacity})`;
+                // Draw fully opaque background for debug
+                ctx.globalAlpha = 1.0;
+                ctx.fillStyle = `rgb(${Math.floor(color >> 16 & 255)}, ${Math.floor(color >> 8 & 255)}, ${Math.floor(color & 255)})`;
                 ctx.beginPath(); ctx.arc(32, 32, 30, 0, Math.PI * 2); ctx.fill();
+                ctx.globalAlpha = 1.0;
+                // Draw a solid outline for debug
+                ctx.lineWidth = 4;
+                ctx.strokeStyle = '#fff';
+                ctx.beginPath(); ctx.arc(32, 32, 30, 0, Math.PI * 2); ctx.stroke();
+                ctx.lineWidth = 2;
+                ctx.strokeStyle = '#000';
+                ctx.beginPath(); ctx.arc(32, 32, 30, 0, Math.PI * 2); ctx.stroke();
+                // Draw a large label for debug
+                ctx.font = 'bold 32px Arial';
+                ctx.fillStyle = 'yellow';
+                let label = '?';
+                if (icon === 'left') label = 'L';
+                else if (icon === 'right') label = 'R';
+                else if (icon === 'up') label = 'U';
+                else if (icon === 'punch') label = 'P';
+                else if (icon === 'kick') label = 'K';
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'middle';
+                ctx.fillText(label, 32, 32);
 
                 ctx.fillStyle = 'white'; ctx.strokeStyle = 'black'; ctx.lineWidth = 3;
                 if (icon === 'left') { ctx.beginPath(); ctx.moveTo(45, 15); ctx.lineTo(19, 32); ctx.lineTo(45, 49); ctx.stroke(); ctx.fill(); }
                 else if (icon === 'right') { ctx.beginPath(); ctx.moveTo(19, 15); ctx.lineTo(45, 32); ctx.lineTo(19, 49); ctx.stroke(); ctx.fill(); }
                 else if (icon === 'up') { ctx.beginPath(); ctx.moveTo(32, 15); ctx.lineTo(47, 30); ctx.lineTo(37, 30); ctx.lineTo(37, 49); ctx.lineTo(27, 49); ctx.lineTo(27, 30); ctx.lineTo(17, 30); ctx.closePath(); ctx.stroke(); ctx.fill(); }
-                else if (icon === 'attack') { ctx.beginPath(); for (let i = 0; i < 8; i++) { const angle = (i / 8) * Math.PI * 2; const radius = (i % 2 === 0) ? 20 : 15; ctx.lineTo(32 + Math.cos(angle) * radius, 32 + Math.sin(angle) * radius); } ctx.closePath(); ctx.stroke(); ctx.fill(); }
+                else if (icon === 'punch') { 
+                    // Draw a fist icon for punch
+                    ctx.beginPath(); 
+                    ctx.arc(32, 32, 15, 0, Math.PI * 2); // Draw fist
+                    ctx.fill(); ctx.stroke();
+                    // Draw knuckles
+                    ctx.beginPath();
+                    ctx.moveTo(22, 25); ctx.lineTo(42, 25); 
+                    ctx.moveTo(22, 32); ctx.lineTo(42, 32);
+                    ctx.stroke();
+                }
+                else if (icon === 'kick') { 
+                    // Draw a foot icon for kick
+                    ctx.beginPath();
+                    // Leg
+                    ctx.moveTo(20, 15); 
+                    ctx.lineTo(32, 32);
+                    // Foot
+                    ctx.lineTo(45, 25);
+                    ctx.lineTo(48, 35);
+                    ctx.lineTo(32, 38);
+                    ctx.closePath();
+                    ctx.fill(); ctx.stroke();
+                }
 
                 const texture = new THREE.CanvasTexture(canvas); texture.needsUpdate = true; texture.minFilter = THREE.LinearFilter;
                 const geo = new THREE.PlaneGeometry(buttonSize, buttonSize);
                 // Use MeshBasicMaterial, depthTest: false to ensure they are drawn on top and don't interact with scene depth
                 const mat = new THREE.MeshBasicMaterial({ map: texture, transparent: true, opacity: 1, depthTest: false, depthWrite: false });
                 const mesh = new THREE.Mesh(geo, mat);
-                mesh.visible = false;
+                mesh.visible = true; // Make buttons visible by default
                 mesh.userData.action = name;
                 mesh.renderOrder = 2; // Render mobile controls above everything else
                 camera.add(mesh); // Add to camera
@@ -725,9 +828,13 @@
             mobileButtons.left = createButton(CONFIG.COLORS.mobileLeftRight, 'moveLeft', 'left');
             mobileButtons.right = createButton(CONFIG.COLORS.mobileLeftRight, 'moveRight', 'right');
             mobileButtons.jump = createButton(CONFIG.COLORS.mobileJump, 'jump', 'up');
-            mobileButtons.punch = createButton(CONFIG.COLORS.mobilePunch, 'attackPunch', 'attack');
-            mobileButtons.kick = createButton(CONFIG.COLORS.mobileKick, 'attackKick', 'attack');
+            mobileButtons.punch = createButton(CONFIG.COLORS.mobilePunch, 'attackPunch', 'punch');
+            mobileButtons.kick = createButton(CONFIG.COLORS.mobileKick, 'attackKick', 'kick');
             positionMobileControls(); // Set initial positions
+            // Debug log after positioning
+            Object.entries(mobileButtons).forEach(([key, btn]) => {
+                console.log('[BUTTON POSITIONED]', key, 'at', btn.position.x, btn.position.y, btn.position.z, 'visible:', btn.visible);
+            });
         }
 
         function positionMobileControls() {
@@ -752,15 +859,20 @@
             const bottomY = -viewHeight / 2 + margin + btnSize / 2;
             const leftX = -viewWidth / 2 + margin + btnSize / 2;
             const rightX = viewWidth / 2 - margin - btnSize / 2;
-
+            
+            // LEFT SIDE: Arrow keys in a layout with jump (up) above the left/right arrows
+            const leftMiddleY = bottomY + btnSize + margin*0.5; // Position for jump button above left/right
+            
+            // Position left/right arrows at the bottom
             mobileButtons.left.position.set(leftX, bottomY, camZOffset);
-            mobileButtons.right.position.set(leftX + btnSize + margin*0.5, bottomY, camZOffset); // Next to left
+            mobileButtons.right.position.set(leftX + btnSize + margin*0.5, bottomY, camZOffset);
+            
+            // Position jump (up) button above the left/right arrows
+            mobileButtons.jump.position.set(leftX + btnSize/2 + margin*0.25, leftMiddleY, camZOffset);
 
+            // RIGHT SIDE: Attack buttons
             mobileButtons.punch.position.set(rightX, bottomY, camZOffset);
-            mobileButtons.kick.position.set(rightX - btnSize - margin*0.5, bottomY, camZOffset); // Next to punch
-
-            // Ensure buttons added to camera are correctly oriented (only needed if camera moves/rotates significantly)
-            // Object.values(mobileButtons).forEach(btn => btn.lookAt(camera.position)); // Usually not needed if camera is static
+            mobileButtons.kick.position.set(rightX - btnSize - margin*0.5, bottomY, camZOffset);
         }
 
         function createConfetti() {
@@ -2172,8 +2284,80 @@
             return false; // No collision
         }
         
+        // Function to set up HTML mobile controls
+        function setupHTMLMobileControls() {
+            const mobileControls = document.getElementById('mobile-controls');
+            
+            // Left button - move left
+            document.getElementById('btn-left').addEventListener('touchstart', function(e) {
+                e.preventDefault();
+                keysPressed['MobileLeft'] = true;
+            });
+            document.getElementById('btn-left').addEventListener('touchend', function(e) {
+                e.preventDefault();
+                keysPressed['MobileLeft'] = false;
+            });
+            
+            // Right button - move right
+            document.getElementById('btn-right').addEventListener('touchstart', function(e) {
+                e.preventDefault();
+                keysPressed['MobileRight'] = true;
+            });
+            document.getElementById('btn-right').addEventListener('touchend', function(e) {
+                e.preventDefault();
+                keysPressed['MobileRight'] = false;
+            });
+            
+            // Jump button
+            document.getElementById('btn-jump').addEventListener('touchstart', function(e) {
+                e.preventDefault();
+                if (gameState === 'gameplay') {
+                    handleJumpInput('player');
+                }
+            });
+            
+            // Punch button
+            document.getElementById('btn-punch').addEventListener('touchstart', function(e) {
+                e.preventDefault();
+                if (gameState === 'gameplay') {
+                    handleAttackInput('player', 'punch');
+                }
+            });
+            
+            // Kick button
+            document.getElementById('btn-kick').addEventListener('touchstart', function(e) {
+                e.preventDefault();
+                if (gameState === 'gameplay') {
+                    handleAttackInput('player', 'kick');
+                }
+            });
+            
+            // Prevent scrolling when touching the buttons
+            document.querySelectorAll('.mobile-control').forEach(btn => {
+                btn.addEventListener('touchmove', function(e) {
+                    e.preventDefault();
+                });
+            });
+            
+            // Show mobile controls during gameplay, hide during other states
+            function updateMobileControlsVisibility() {
+                if (gameState === 'gameplay') {
+                    mobileControls.style.display = 'block';
+                } else {
+                    mobileControls.style.display = 'none';
+                }
+            }
+            
+            // Initial visibility
+            updateMobileControlsVisibility();
+            
+            // Monitor gameState changes to update visibility
+            setInterval(updateMobileControlsVisibility, 500);
+        }
+        
         // --- Start ---
         init();
+        setupHTMLMobileControls();
         
         // Debug log to confirm initialization
         console.log('Game initialized, waiting for gameplay to start');
