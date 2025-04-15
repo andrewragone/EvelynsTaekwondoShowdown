@@ -96,7 +96,7 @@
                 maxJumpHeight: 2.0, // Increased maximum jump height
             },
             ATTACK: {
-                punchReach: 1.2, punchDamage: 1, punchDuration: 300,
+                punchReach: 1.6, punchDamage: 1, punchDuration: 300,
                 kickReach: 3.0, kickDamage: 2, kickDuration: 500, // Increased reach to allow kicks to connect at safe distance
                 cooldown: 0, // Reduced cooldown for more responsive attacks
             },
@@ -556,17 +556,30 @@
             
             group.add(plane);
             
+            // Load punch textures
+            const punchTextures = [];
+            for (let i = 1; i <= 10; i++) {
+                const num = i.toString().padStart(3, '0');
+                const texture = textureLoader.load(`assets/images/evelyn-punch-${num}.png`, texture => {
+                    extractTextureData(texture, `punch-${num}`);
+                });
+                punchTextures.push(texture);
+            }
             // Store animation data
             group.userData = {
                 body: plane,
                 standingTexture: standingTexture,
                 kickTextures: kickTextures,
+                punchTextures: punchTextures,
                 jumpTextures: jumpTextures,
                 isKicking: false,
+                isPunching: false,
                 isJumping: false,
                 currentKickFrame: 0,
+                currentPunchFrame: 0,
                 currentJumpFrame: 0,
-                kickTimer: 0
+                kickTimer: 0,
+                punchTimer: 0
             };
             
             return group;
@@ -803,9 +816,15 @@
             
             // Only process gameplay inputs during gameplay state
             if (gameState === 'gameplay') {
-                if (event.code === 'Space') { 
-                    event.preventDefault(); 
-                    handleAttackInput('player'); 
+                // 'c' triggers a kick
+                if (event.key === 'c' || event.key === 'C') {
+                    event.preventDefault();
+                    handleAttackInput('player', 'kick');
+                }
+                // 'x' triggers a punch
+                if (event.key === 'x' || event.key === 'X') {
+                    event.preventDefault();
+                    handleAttackInput('player', 'punch');
                 }
                 if (event.code === 'ArrowUp') { 
                     event.preventDefault(); 
@@ -983,11 +1002,24 @@
                     char.userData.isKicking = true;
                     char.userData.kickTimer = 0;
                     char.userData.currentKickFrame = 0;
-                    
+                    char.userData.isPunching = false;
+                    char.userData.punchTimer = 0;
+                    char.userData.currentPunchFrame = 0;
                     // Set first frame immediately
                     char.userData.body.material.map = char.userData.kickTextures[0];
                     char.userData.body.material.needsUpdate = true;
                     console.log(`${characterId} starting kick animation with texture: kick-001`);
+                } else if (char.userData.attackType === 'punch') {
+                    char.userData.isPunching = true;
+                    char.userData.punchTimer = 0;
+                    char.userData.currentPunchFrame = 0;
+                    char.userData.isKicking = false;
+                    char.userData.kickTimer = 0;
+                    char.userData.currentKickFrame = 0;
+                    // Set first frame immediately
+                    char.userData.body.material.map = char.userData.punchTextures[0];
+                    char.userData.body.material.needsUpdate = true;
+                    console.log(`${characterId} starting punch animation with texture: punch-001`);
                 }
                 
                 char.userData.attackTimer = (char.userData.attackType === 'punch') ? 
@@ -1000,6 +1032,9 @@
 
         // --- Game Logic ---
         function updatePlayer(deltaTime) {
+    if (player && player.userData) {
+        console.log(`[PUNCH DEBUG] updatePlayer called. isPunching=${player.userData.isPunching}, isKicking=${player.userData.isKicking}, isJumping=${player.userData.jumping}, currentPunchFrame=${player.userData.currentPunchFrame}`);
+    }
             if (gameState !== 'gameplay' || !player) return;
             
             // Get current time for animation debugging
@@ -1100,6 +1135,10 @@
             }
 
             // 5. Handle jumping physics
+    // DEBUG: End of updatePlayer, punch state
+    if (player && player.userData) {
+        console.log(`[PUNCH DEBUG] End of updatePlayer. isPunching=${player.userData.isPunching}, currentPunchFrame=${player.userData.currentPunchFrame}`);
+    }
             if (player.userData.jumping) {
                 // Apply gravity (scale with deltaTime for consistent behavior)
                 player.userData.velocityY -= CONFIG.MOVEMENT.gravity * deltaTime * 60;
@@ -1412,8 +1451,10 @@
             // Ensure both characters use the same damage values regardless of who is attacking
             const damage = (attackType === 'punch') ? CONFIG.ATTACK.punchDamage : CONFIG.ATTACK.kickDamage;
             
-            // Get current animation frame for kicks
-            const currentFrame = attacker.userData.currentKickFrame || 0;
+            // Get current animation frame based on attack type
+            const currentFrame = attacker.userData.isKicking ? 
+                attacker.userData.currentKickFrame || 0 : 
+                attacker.userData.currentPunchFrame || 0;
             
             // Calculate distance based on X and Y only, ignoring Z
             const dx = attacker.position.x - target.position.x;
@@ -1636,8 +1677,8 @@
                 return;
             }
 
-            // Reset to standing if not walking, jumping, or kicking
-            if (!character.userData.isWalking && !character.userData.jumping && !character.userData.isKicking) {
+            // Reset to standing if not walking, jumping, kicking, or punching
+            if (!character.userData.isWalking && !character.userData.jumping && !character.userData.isKicking && !character.userData.isPunching) {
                 if (character.userData.body.material.map !== character.userData.standingTexture) {
                     character.userData.body.material.map = character.userData.standingTexture;
                     character.userData.body.material.needsUpdate = true;
@@ -1685,6 +1726,61 @@
             }
         }
 
+        // Punch animation handler
+        function updatePunchAnimation(character, deltaTime, targetCharacter) {
+    // DEBUG: Punch animation handler called
+    if (character && character.userData && character.userData.id) {
+        console.log(`[PUNCH DEBUG] updatePunchAnimation called for ${character.userData.id}. isPunching=${character.userData.isPunching}, currentPunchFrame=${character.userData.currentPunchFrame}, punchTimer=${character.userData.punchTimer}`);
+    }
+            if (!character || !character.userData || !character.userData.body || !character.userData.isPunching) return;
+            // Animation timing
+            const punchFrames = character.userData.punchTextures.length;
+            const punchDuration = CONFIG.ATTACK.punchDuration;
+            const frameDuration = punchDuration / punchFrames;
+            character.userData.punchTimer = (character.userData.punchTimer || 0) + deltaTime * 1000;
+            let frame = Math.floor(character.userData.punchTimer / frameDuration);
+    // DEBUG: Calculated punch frame
+    if (character && character.userData) {
+        console.log(`[PUNCH DEBUG] Frame calculation: punchTimer=${character.userData.punchTimer}, frameDuration=${frameDuration}, frame=${frame}`);
+    }
+            if (frame >= punchFrames) frame = punchFrames - 1;
+    // DEBUG: Frame after clamp
+    if (character && character.userData) {
+        console.log(`[PUNCH DEBUG] Frame after clamp: frame=${frame}, punchFrames=${punchFrames}`);
+    }
+            character.userData.currentPunchFrame = frame;
+            // Set punch frame texture
+            character.userData.body.material.map = character.userData.punchTextures[frame];
+            character.userData.body.material.needsUpdate = true;
+
+            // Ensure punch is considered an attack for hit checks
+            character.userData.attacking = true;
+
+            // --- Punch hit detection logic ---
+            // Only allow one hit per punch
+            if (frame >= 3 && frame <= 5 && !character.userData.hitThisAttack && targetCharacter) {
+                console.log(`${character.userData.id} checking for punch hit on frame ${frame}`);
+                const hitLanded = checkAttackHit(character, targetCharacter);
+                if (hitLanded) {
+                    console.log(`Hit landed for ${character.userData.id} with punch on frame ${frame}`);
+                }
+            }
+            // End animation
+            if (character.userData.punchTimer >= punchDuration) {
+        console.log(`[PUNCH DEBUG] Punch animation finished for ${character.userData.id}`);
+                character.userData.isPunching = false;
+                character.userData.attacking = false;
+                character.userData.punchTimer = 0;
+                character.userData.currentPunchFrame = 0;
+                // Restore standing texture
+                character.userData.body.material.map = character.userData.standingTexture;
+                character.userData.body.material.needsUpdate = true;
+                // Reset all hit tracking flags
+                character.userData.hitThisAttack = false;
+                character.userData.hitByFrame = {};
+                character.userData.hitThisFrame = {};
+            }
+        }
         // Added targetCharacter parameter
         function updateKickAnimation(player, deltaTime, targetCharacter) {
             if (!player || !player.userData || !player.userData.body) {
@@ -1792,6 +1888,9 @@
             if (gameState === 'intro') updateIntroAnimation(deltaTime);
             if (gameState === 'ending') updateEndingAnimation(deltaTime);
 
+            // Update punch animations before kick/walking animations
+            if (player && player.userData.isPunching) updatePunchAnimation(player, deltaTime, opponent);
+            if (opponent && opponent.userData.isPunching) updatePunchAnimation(opponent, deltaTime, player);
             // Update kick animations before walking animations (prioritizes kicks)
             // Pass the correct target character
             if (player && player.userData.isKicking) updateKickAnimation(player, deltaTime, opponent);
@@ -1801,10 +1900,10 @@
             if (player && player.userData.jumping) updateJumpAnimation(player, deltaTime);
             if (opponent && opponent.userData.jumping) updateJumpAnimation(opponent, deltaTime);
             
-            // Update Walking Animations (AFTER jump/kick, BEFORE render)
-            // Always update walking animation to ensure it's properly called
-            if (player && !player.userData.isKicking && !player.userData.jumping) updateWalkingAnimation(player, deltaTime);
-            if (opponent && !opponent.userData.isKicking && !opponent.userData.jumping) updateWalkingAnimation(opponent, deltaTime);
+            // Update Walking Animations (AFTER jump/kick/punch, BEFORE render)
+            // Only update walking animation if not punching, kicking, or jumping
+            if (player && !player.userData.isKicking && !player.userData.jumping && !player.userData.isPunching) updateWalkingAnimation(player, deltaTime);
+            if (opponent && !opponent.userData.isKicking && !opponent.userData.jumping && !opponent.userData.isPunching) updateWalkingAnimation(opponent, deltaTime);
             
             // Update gameplay logic only in gameplay state
             if (gameState === 'gameplay') {
