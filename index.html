@@ -124,7 +124,7 @@
     <script>
         // --- Configuration ---
         const CONFIG = {
-            CAMERA_POS: new THREE.Vector3(0, 2.4, 6), // Raised camera Y to lower characters on screen
+            CAMERA_POS: new THREE.Vector3(0, 2.4, 10), // Moved camera farther back to reduce perspective distortion
             CHARACTER: {
                 bodyRadius: 0.5, bodyHeight: 1.88,
                 headRadius: 0.375,
@@ -207,6 +207,8 @@
 
         // --- Global Variables ---
         let scene, camera, renderer, clock;
+        // Consistent ground height for all character logic
+        const GROUND_Y = CONFIG.CHARACTER.legLowerLength / 2 - 1;
         let gameState = 'loading'; // loading, intro, gameplay, ending
         let player, opponent;
         let floor;
@@ -247,9 +249,9 @@
         // --- Initialization ---
         function init() {
             scene = new THREE.Scene();
-            camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+            camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 1000); // Reduced FOV from 75 to 45 for less distortion
             camera.position.copy(CONFIG.CAMERA_POS);
-            camera.lookAt(0, 0.7, 0); // Lowered lookAt target to move characters lower on screen
+            camera.lookAt(0, 0.7, 0); // Looking at the same point, but with less perspective distortion
 
             renderer = new THREE.WebGLRenderer({ antialias: true });
             renderer.setSize(window.innerWidth, window.innerHeight);
@@ -389,14 +391,15 @@
                 new THREE.PlaneGeometry(height * aspectRatio, height),
                 introMaterial
             );
-            introCharacter.position.set(0, 1, 0);
+            introCharacter.position.set(0, 0.5, 0);
+            introCharacter.scale.set(1.15, 1.15, 1.15);
             scene.add(introCharacter);
             
             const introLines = [
                 "Evelyn's Taekwondo Showdown:", "8th Birthday Party Edition", "",
                 "Get ready to kick it at UMAC Briarcliff!"
             ];
-            introText = createTextMesh(introLines.join('\n'), { x: 0, y: 1.5, z: 0 }, 0.8, true); // Changed y from 3 to 1.5
+            introText = createTextMesh(introLines.join('\n'), { x: 0, y: 0.5, z: 0 }, 0.8, true); // Lowered y to match introCharacter
             introText.material.opacity = 1; // Changed from 0 to 1 to make visible
             scene.add(introText);
 
@@ -461,7 +464,8 @@
             player.userData.originalColor = new THREE.Color(1, 1, 1); // Store original color for hit effect
             
             // Use the calculated ground level for initial position - player on left
-            player.position.set(CONFIG.ARENA.playerStartX, CONFIG.CHARACTER.legLowerLength / 2, 0);
+            player.position.set(CONFIG.ARENA.playerStartX, CONFIG.CHARACTER.legLowerLength / 2 - 1, 0);
+            player.scale.set(1.05, 1.05, 1.05);
             
             // Preserve the limb references by merging the initial state into the existing userData
             Object.assign(player.userData, initialPlayerState);
@@ -471,7 +475,8 @@
             opponent = createCharacter(CONFIG.CHARACTER.opponentGiColor, true, true); // Opponent has belt and is flipped
             
             // Use the calculated ground level for initial position - opponent on right
-            opponent.position.set(CONFIG.ARENA.opponentStartX, CONFIG.CHARACTER.legLowerLength / 2, 0);
+            opponent.position.set(CONFIG.ARENA.opponentStartX, CONFIG.CHARACTER.legLowerLength / 2 - 1, 0);
+            opponent.scale.set(1.05, 1.05, 1.05);
             
             // Preserve the limb references by merging the initial state into the existing userData
             Object.assign(opponent.userData, initialOpponentState);
@@ -1293,9 +1298,9 @@
                 if (newY > CONFIG.MOVEMENT.maxJumpHeight) {
                     player.position.y = CONFIG.MOVEMENT.maxJumpHeight;
                     player.userData.velocityY = 0; // Start falling
-                } else if (newY <= CONFIG.CHARACTER.legLowerLength / 2) {
+                } else if (newY <= GROUND_Y) {
                     // Ground collision - ensure character is at proper floor level
-                    player.position.y = CONFIG.CHARACTER.legLowerLength / 2;
+                    player.position.y = GROUND_Y;
                     player.userData.jumping = false;
                     player.userData.velocityY = 0;
                     // If landing while move keys are released, ensure walking stops
@@ -1380,9 +1385,9 @@
                 if (newY > CONFIG.MOVEMENT.maxJumpHeight) {
                     opponent.position.y = CONFIG.MOVEMENT.maxJumpHeight;
                     opponent.userData.velocityY = 0; // Start falling
-                } else if (newY <= CONFIG.CHARACTER.legLowerLength / 2) {
+                } else if (newY <= GROUND_Y) {
                     // Ground collision - ensure character is at proper floor level
-                    opponent.position.y = CONFIG.CHARACTER.legLowerLength / 2;
+                    opponent.position.y = GROUND_Y;
                     opponent.userData.jumping = false;
                     opponent.userData.velocityY = 0;
                     
@@ -1794,32 +1799,30 @@
             if (character.userData.jumping) {
                 const body = character.userData.body;
                 const jumpTextures = character.userData.jumpTextures;
-                
                 // Update frame based on vertical position and velocity
                 if (character.position.y > 0.5) {
                     // In air - use second frame
                     body.material.map = jumpTextures[1];
-                } else if (character.position.y > 0) { 
+                } else if (character.position.y > 0) {
                     // Initial jump or landing - use first frame
                     body.material.map = jumpTextures[0];
                 }
                 // Note: We don't set standing texture here - it's handled in updatePlayer
-                // when character actually lands (position.y <= 0)
+                // when character actually lands (position.y <= GROUND_Y)
                 body.material.needsUpdate = true;
-            } else if (character.position.y === CONFIG.CHARACTER.legLowerLength / 2) {
+            } else if (character.position.y === GROUND_Y) {
                 // Safety check - ensure standing texture when on ground
                 character.userData.body.material.map = character.userData.standingTexture;
                 character.userData.body.material.needsUpdate = true;
             }
         }
-        
-        // New function for walking animation using the same approach as kick animation
+
+        // Walking animation logic (restored and separated)
         function updateWalkingAnimation(character, deltaTime) {
             if (!character || !character.userData || !character.userData.body || !character.userData.walkingTextures || character.userData.walkingTextures.length === 0) {
                 //console.log('[WALKING ANIM] Update skipped: Missing data or textures');
                 return;
             }
-
             // Reset to standing if not walking, jumping, kicking, or punching
             if (!character.userData.isWalking && !character.userData.jumping && !character.userData.isKicking && !character.userData.isPunching) {
                 if (character.userData.body.material.map !== character.userData.standingTexture) {
@@ -1829,31 +1832,24 @@
                 }
                 return; // Exit if not walking
             }
-
             // Only proceed if actually walking
             if (character.userData.isWalking) {
                 // Update animation timer
                 character.userData.walkingTimer = (character.userData.walkingTimer || 0) + deltaTime;
-                
                 // Update frame every 100ms (10fps)
                 if (character.userData.walkingTimer >= 0.1) {
                     character.userData.walkingTimer = 0;
-                    
                     // Get current frame and calculate next frame
                     const currentFrame = character.userData.currentWalkingFrame || 0;
                     const nextFrame = (currentFrame + 1) % character.userData.walkingTextures.length;
-                    
                     // Update frame counter
                     character.userData.currentWalkingFrame = nextFrame;
-                    
                     console.log(`[WALKING ANIM] Character ${character.userData.id} walking frame: ${nextFrame+1}/${character.userData.walkingTextures.length}, texture available: ${!!character.userData.walkingTextures[nextFrame]}`);
-                    
                     // Apply the texture
                     if (character.userData.walkingTextures && character.userData.walkingTextures.length > 0) {
                         character.userData.body.material.map = character.userData.walkingTextures[nextFrame];
                         character.userData.body.material.needsUpdate = true;
                     }
-                    
                     // IMPORTANT: Always make character face the opponent regardless of walking direction
                     const opponent = character.userData.id === 'player' ? window.opponent : window.player;
                     if (opponent) {
