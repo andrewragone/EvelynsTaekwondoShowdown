@@ -459,8 +459,19 @@
             // Reset game clock to ensure consistent timing for AI decisions
             clock = new THREE.Clock();
             
-            document.getElementById('instructions').style.display = 'block';
-    document.getElementById('mobile-controls').style.display = 'block'; // Show mobile controls
+            // Check if on mobile device before showing instructions
+            const isMobileDevice = ('ontouchstart' in window) || 
+                                  (navigator.maxTouchPoints > 0) || 
+                                  /Android|iPhone|iPad|iPod|IEMobile|Opera Mini/i.test(navigator.userAgent);
+            
+            // Only show instructions on desktop
+            if (!isMobileDevice) {
+                document.getElementById('instructions').style.display = 'block';
+            } else {
+                document.getElementById('instructions').style.display = 'none';
+            }
+            
+            document.getElementById('mobile-controls').style.display = 'block'; // Show mobile controls
             
             // Start background music
             playBackgroundMusic();
@@ -2406,6 +2417,7 @@
         // Function to set up HTML mobile controls
         function setupHTMLMobileControls() {
             const mobileControls = document.getElementById('mobile-controls');
+            const instructionsDiv = document.getElementById('instructions');
             
             // More reliable mobile detection - force desktop to hide controls
             const isMobileDevice = ('ontouchstart' in window) || 
@@ -2421,6 +2433,12 @@
                 mobileControls.style.pointerEvents = 'none';
                 console.log('Desktop browser detected, mobile controls disabled');
                 return;
+            }
+            
+            // Hide instructions div on mobile devices
+            if (instructionsDiv) {
+                instructionsDiv.style.display = 'none';
+                console.log('Mobile device detected, hiding instructions');
             }
             
             // Left button - move left
