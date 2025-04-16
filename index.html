@@ -94,12 +94,16 @@
             bottom: 20px;
             right: 90px;
         }
+        #btn-block {
+            bottom: 20px;
+            right: 160px;
+        }
     </style>
 </head>
 <body>
     <div id="instructions">
-        Desktop: Arrow Keys (Move/Jump), X (Punch), C (Kick)<br>
-        Mobile: Left side - movement arrows, Right side - attack buttons
+        Desktop: Arrow Keys (Move/Jump), X (Punch), C (Kick), Z (Block)<br>
+        Mobile: Left side - movement arrows, Right side - attack buttons (P=Punch, K=Kick, B=Block)
     </div>
     <div id="player-health-bar" class="health-bar">
         <div id="player-health-bar-fill" class="health-bar-fill"></div>
@@ -118,6 +122,7 @@
         <!-- Right side controls -->
         <div id="btn-punch" class="mobile-control">P</div>
         <div id="btn-kick" class="mobile-control">K</div>
+        <div id="btn-block" class="mobile-control">B</div>
     </div>
     
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r134/three.min.js"></script>
@@ -223,7 +228,7 @@
         let gameStarted = false;
 
         // Initial player/opponent states
-        const initialPlayerState = { jumping: false, velocityY: 0, attacking: false, attackType: 'punch', attackTimer: 0, lastAttackTime: 0, health: CONFIG.HEALTH.max, id: 'player', position: { x: -2 } };
+        const initialPlayerState = { jumping: false, velocityY: 0, attacking: false, attackType: 'punch', attackTimer: 0, lastAttackTime: 0, health: CONFIG.HEALTH.max, id: 'player', position: { x: -2 }, blocking: false };
         const initialOpponentState = { 
             attacking: false, 
             attackType: 'punch', 
@@ -589,6 +594,10 @@
                 // Create a canvas to extract pixel data for collision detection
                 extractTextureData(texture, 'standing');
             });
+            // Load block texture for player (used for block visual feedback)
+            const blockTexture = textureLoader.load('assets/images/evelyn-block.png', texture => {
+                extractTextureData(texture, 'block');
+            });
             
             // Preload all kick frames (0001-0010)
             const kickTextures = [];
@@ -654,6 +663,7 @@
             group.userData = {
                 body: plane,
                 standingTexture: standingTexture,
+                blockTexture: blockTexture, // Add block texture for blocking visual
                 kickTextures: kickTextures,
                 punchTextures: punchTextures,
                 jumpTextures: jumpTextures,
@@ -974,6 +984,17 @@
                     event.preventDefault();
                     handleAttackInput('player', 'punch');
                 }
+                // 'z' triggers block
+                if (event.key === 'z' || event.key === 'Z') {
+                    event.preventDefault();
+                    // Set blocking state
+                    player.userData.blocking = true;
+                    // Set block texture for visual feedback
+                    if (player.userData.blockTexture) {
+                        player.userData.body.material.map = player.userData.blockTexture;
+                        player.userData.body.material.needsUpdate = true;
+                    }
+                }
                 if (event.code === 'ArrowUp') { 
                     event.preventDefault(); 
                     handleJumpInput('player'); 
@@ -983,6 +1004,16 @@
 
         function onKeyUp(event) {
             keysPressed[event.code] = false;
+            
+            // Handle block release (Z key)
+            if (gameState === 'gameplay' && (event.key === 'z' || event.key === 'Z')) {
+                player.userData.blocking = false;
+                // Revert to standing texture when block is released
+                if (player.userData.standingTexture) {
+                    player.userData.body.material.map = player.userData.standingTexture;
+                    player.userData.body.material.needsUpdate = true;
+                }
+            }
         }
 
         // --- Pointer (Mouse/Touch) Handlers ---
@@ -1823,8 +1854,8 @@
                 //console.log('[WALKING ANIM] Update skipped: Missing data or textures');
                 return;
             }
-            // Reset to standing if not walking, jumping, kicking, or punching
-            if (!character.userData.isWalking && !character.userData.jumping && !character.userData.isKicking && !character.userData.isPunching) {
+            // Reset to standing if not walking, jumping, kicking, punching, or blocking
+            if (!character.userData.isWalking && !character.userData.jumping && !character.userData.isKicking && !character.userData.isPunching && !character.userData.blocking) {
                 if (character.userData.body.material.map !== character.userData.standingTexture) {
                     character.userData.body.material.map = character.userData.standingTexture;
                     character.userData.body.material.needsUpdate = true;
@@ -2364,6 +2395,28 @@
                 e.preventDefault();
                 if (gameState === 'gameplay') {
                     handleAttackInput('player', 'punch');
+                }
+            });
+
+            // Block button (touchstart = block ON, touchend = block OFF)
+            document.getElementById('btn-block').addEventListener('touchstart', function(e) {
+                e.preventDefault();
+                if (gameState === 'gameplay') {
+                    player.userData.blocking = true;
+                    // Set block texture for visual feedback
+                    if (player.userData.blockTexture) {
+                        player.userData.body.material.map = player.userData.blockTexture;
+                        player.userData.body.material.needsUpdate = true;
+                    }
+                }
+            });
+            document.getElementById('btn-block').addEventListener('touchend', function(e) {
+                e.preventDefault();
+                player.userData.blocking = false;
+                // Revert to standing texture when block is released
+                if (player.userData.standingTexture) {
+                    player.userData.body.material.map = player.userData.standingTexture;
+                    player.userData.body.material.needsUpdate = true;
                 }
             });
             
