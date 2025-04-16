@@ -1663,9 +1663,28 @@
                 if (canHit) {
                     // Use pixel-based collision detection
                     if (detectPixelCollision(attacker, target)) {
+                        // Check if target is blocking
+                        if (target.userData.blocking) {
+                            console.log(`ATTACK BLOCKED: ${target.userData.id} blocked ${attackType} from ${attacker.userData.id} on frame ${currentFrame}!`);
+                            // No damage is applied when blocking
+                            
+                            // Still count this as a hit for animation purposes
+                            attacker.userData.hitThisAttack = true;
+                            if (attacker.userData.isKicking) {
+                                attacker.userData.hitByFrame[currentFrame] = true;
+                                attacker.userData.hitThisFrame[currentFrame] = true;
+                            }
+                            
+                            // Optional: Add visual or sound effect for successful block
+                            // For now, we'll just show a different hit effect
+                            showBlockEffect(target);
+                            
+                            return true; // Hit was detected but blocked
+                        }
+                        
                         console.log(`HIT CONFIRMED: ${attacker.userData.id} hit ${target.userData.id} with ${attackType} for ${damage} damage on frame ${currentFrame}!`);
 
-                        // Apply damage
+                        // Apply damage (only if not blocking)
                         target.userData.health -= damage;
                         target.userData.health = Math.max(0, target.userData.health);
                         
@@ -1740,7 +1759,38 @@
             // Log hit for debugging
             console.log(`HIT CONFIRMED on ${target.userData.id}! Current health: ${target.userData.health}`);
         }
-        
+
+        // Visual feedback for successful block
+        function showBlockEffect(target) {
+            if (!target || !target.userData || !target.userData.body) return;
+            
+            // Store the original color if not already stored
+            if (!target.userData.originalColor) {
+                target.userData.originalColor = new THREE.Color(1, 1, 1); // Default white
+            }
+            
+            // Flash the character blue briefly to indicate successful block
+            target.userData.body.material.color.set(0x0088ff); // Blue
+            target.userData.body.material.needsUpdate = true;
+            
+            // Clear any existing timeout to prevent conflicts
+            if (target.userData.blockEffectTimeout) {
+                clearTimeout(target.userData.blockEffectTimeout);
+            }
+            
+            // Reset color after a short delay
+            target.userData.blockEffectTimeout = setTimeout(() => {
+                if (target && target.userData && target.userData.body) {
+                    target.userData.body.material.color.copy(target.userData.originalColor);
+                    target.userData.body.material.needsUpdate = true;
+                    console.log(`Reset color for ${target.userData.id} after block`);
+                }
+            }, 200); // 200ms flash
+            
+            // Log block for debugging
+            console.log(`BLOCK SUCCESSFUL by ${target.userData.id}!`);
+        }
+
         // --- Animations (Ensure check for character existence) ---
          function updateIntroAnimation(deltaTime) {
             const now = clock.getElapsedTime();
@@ -1863,6 +1913,17 @@
                 }
                 return; // Exit if not walking
             }
+            // Check if character just stopped walking but is still blocking
+            if (!character.userData.isWalking && character.userData.blocking && character.userData.blockTexture) {
+                // If we were walking and now we're blocking, restore the block texture
+                if (character.userData.body.material.map !== character.userData.blockTexture) {
+                    character.userData.body.material.map = character.userData.blockTexture;
+                    character.userData.body.material.needsUpdate = true;
+                    console.log(`[WALKING ANIM] ${character.userData.id} reset to blocking after walking`);
+                }
+                return; // Exit after restoring block texture
+            }
+            
             // Only proceed if actually walking
             if (character.userData.isWalking) {
                 // Update animation timer
