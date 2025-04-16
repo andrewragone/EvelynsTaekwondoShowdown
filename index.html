@@ -9,7 +9,7 @@
         canvas { display: block; }
         #instructions {
             position: absolute;
-            top: 10px;
+            bottom: 10px;
             left: 10px;
             color: white;
             font-family: Arial, sans-serif;
@@ -98,7 +98,7 @@
 </head>
 <body>
     <div id="instructions">
-        Desktop: Arrow Keys (Move/Jump), Spacebar (Attack)<br>
+        Desktop: Arrow Keys (Move/Jump), X (Punch), C (Kick)<br>
         Mobile: Left side - movement arrows, Right side - attack buttons
     </div>
     <div id="player-health-bar" class="health-bar">
@@ -124,14 +124,14 @@
     <script>
         // --- Configuration ---
         const CONFIG = {
-            CAMERA_POS: new THREE.Vector3(0, 2, 6), // Moved camera closer to better frame the skinnier dojo
+            CAMERA_POS: new THREE.Vector3(0, 2.4, 6), // Raised camera Y to lower characters on screen
             CHARACTER: {
-                bodyRadius: 0.4, bodyHeight: 1.5,
-                headRadius: 0.3,
-                shoulderWidth: 0.7,
-                armUpperLength: 0.6, armLowerLength: 0.5, armRadius: 0.15,
-                legUpperLength: 0.7, legLowerLength: 0.7, legRadius: 0.18,
-                beltSize: new THREE.Vector3(0.9, 0.15, 0.45),
+                bodyRadius: 0.5, bodyHeight: 1.88,
+                headRadius: 0.375,
+                shoulderWidth: 0.875,
+                armUpperLength: 0.75, armLowerLength: 0.625, armRadius: 0.19,
+                legUpperLength: 0.875, legLowerLength: 0.875, legRadius: 0.225,
+                beltSize: new THREE.Vector3(1.125, 0.19, 0.56),
                 skinColor: 0xf5d7b2,
                 giColor: 0xffffff,
                 opponentGiColor: 0xff0000,
@@ -249,7 +249,7 @@
             scene = new THREE.Scene();
             camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
             camera.position.copy(CONFIG.CAMERA_POS);
-            camera.lookAt(0, 1, 0);
+            camera.lookAt(0, 0.7, 0); // Lowered lookAt target to move characters lower on screen
 
             renderer = new THREE.WebGLRenderer({ antialias: true });
             renderer.setSize(window.innerWidth, window.innerHeight);
@@ -288,12 +288,10 @@
                         console.log('Background texture loaded successfully');
                         const spriteMaterial = new THREE.SpriteMaterial({ map: texture });
                         backgroundSprite = new THREE.Sprite(spriteMaterial);
-                        
-                        // Increase scale proportionally for zoom effect
-                        const zoomFactor = 3; // Adjust this value for desired zoom level
-                        backgroundSprite.scale.set(16 * zoomFactor, 9 * zoomFactor, 1);
                         backgroundSprite.position.z = -15; // Move back further to accommodate zoom
                         scene.add(backgroundSprite);
+                        // Scale to fill camera view
+                        scaleSpriteToCamera(backgroundSprite, camera, 1.0);
                     },
                     undefined,
                     (err) => console.error('Error loading background texture:', err)
@@ -310,6 +308,30 @@
             const directionalLight = new THREE.DirectionalLight(0xffffff, 0.5);
             directionalLight.position.set(1, 1, 1).normalize();
             scene.add(directionalLight);
+        }
+
+        // Utility: Scale a sprite to fill the camera view (no black bars)
+        function scaleSpriteToCamera(sprite, camera, zoomFactor = 1) {
+            if (!sprite || !camera) return;
+            const vFOV = THREE.MathUtils.degToRad(camera.fov);
+            const distance = Math.abs(camera.position.z - (sprite.position.z || 0));
+            const height = 2 * Math.tan(vFOV / 2) * distance;
+            const width = height * camera.aspect;
+            const tex = sprite.material.map;
+            if (tex && tex.image) {
+                const imgAspect = tex.image.width / tex.image.height;
+                let spriteW = width * zoomFactor;
+                let spriteH = height * zoomFactor;
+                // Fit to cover (no black bars)
+                if (spriteW / spriteH > imgAspect) {
+                    spriteH = spriteW / imgAspect;
+                } else {
+                    spriteW = spriteH * imgAspect;
+                }
+                sprite.scale.set(spriteW, spriteH, 1);
+            } else {
+                sprite.scale.set(width * zoomFactor, height * zoomFactor, 1);
+            }
         }
 
         // --- State Management & Scene Setup ---
@@ -921,6 +943,15 @@
             camera.updateProjectionMatrix();
             renderer.setSize(window.innerWidth, window.innerHeight);
             positionMobileControls();
+            // Rescale dojo background
+            if (backgroundSprite) scaleSpriteToCamera(backgroundSprite, camera, 1.0);
+            // If intro/ending image is present, rescale that too (pattern for you to use):
+            if (typeof introCharacter !== 'undefined' && introCharacter && introCharacter.material && introCharacter.material.map) {
+                scaleSpriteToCamera(introCharacter, camera, 1.0);
+            }
+            if (typeof endCharacter !== 'undefined' && endCharacter && endCharacter.material && endCharacter.material.map) {
+                scaleSpriteToCamera(endCharacter, camera, 1.0);
+            }
         }
 
         function onKeyDown(event) {
