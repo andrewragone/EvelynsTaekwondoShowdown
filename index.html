@@ -622,6 +622,7 @@
             const endImageSrc = playerWon ? 'assets/images/evelyn-won.png' : 'assets/images/evelyn-lost.png';
             const loader = new THREE.TextureLoader();
             loader.load(endImageSrc, texture => {
+                if (gameState !== 'ending') return; // avoid adding sprite after restarting
                 const material = new THREE.SpriteMaterial({ map: texture, transparent: true });
                 const endSprite = new THREE.Sprite(material);
                 endSprite.name = 'endSprite';
