@@ -497,6 +497,7 @@
             document.getElementById('mobile-controls').style.display = 'block'; // Show mobile controls
             
             // Start background music
+            initAudio();
             playBackgroundMusic();
 
             player = createCharacter(CONFIG.CHARACTER.giColor, false, false); // Player has no belt
@@ -1572,11 +1573,6 @@
                     // Reset hit flag before new attacks
                     opponent.userData.hitThisAttack = false;
                     
-                    // Increase attack probability when close to player
-                    if (distanceToPlayer < CHARACTER_HALF_WIDTH * 3) {
-                        attackProbability = 0.8; // 80% chance to attack when close
-                    }
-                    
                     // We'll let the existing opponent movement code handle facing direction
                     
                     const attackRoll = Math.random();
@@ -2254,7 +2250,20 @@
         // --- Audio Functions ---
         function initAudio() {
             // Create audio element for background music
-            backgroundMusic = new Audio('assets/music/09. Ryu Stage.mp3');
+            const tracks = [
+                '05. Ken Stage.mp3',
+                '09. Ryu Stage.mp3',
+                '12. Chun-Li Stage.mp3',
+                '18. Dee Jay Stage.mp3',
+                '27. Cammy Stage.mp3',
+                '33. Guile Stage.mp3',
+                '42. Zangief Stage.mp3',
+                '48. M. Bison Stage.mp3',
+                '51. Balrog Stage.mp3',
+                '57. Vega Stage.mp3'
+            ];
+            const choice = tracks[Math.floor(Math.random() * tracks.length)];
+            backgroundMusic = new Audio(`assets/music/${choice}`);
             backgroundMusic.loop = true;
             backgroundMusic.volume = 0.7; // 70% volume
             
