@@ -102,8 +102,8 @@
 </head>
 <body>
     <div id="instructions">
-        Desktop: Arrow Keys (Move/Jump), X (Punch), C (Kick), Z (Block)<br>
-        Mobile: Left side - movement arrows, Right side - attack buttons (P=Punch, K=Kick, B=Block)
+        Desktop: Arrow Keys (Move/Jump), C (Punch), X (Kick), Z (Block)<br>
+        Mobile: Left side - movement arrows, Right side - attack buttons (C=Punch, X=Kick, B=Block)
     </div>
     <div id="player-health-bar" class="health-bar">
         <div id="player-health-bar-fill" class="health-bar-fill"></div>
@@ -120,8 +120,8 @@
         <div id="btn-jump" class="mobile-control">↑</div>
         
         <!-- Right side controls -->
-        <div id="btn-punch" class="mobile-control">P</div>
-        <div id="btn-kick" class="mobile-control">K</div>
+        <div id="btn-punch" class="mobile-control">C</div>
+        <div id="btn-kick" class="mobile-control">X</div>
         <div id="btn-block" class="mobile-control">B</div>
     </div>
     
@@ -164,8 +164,8 @@
             },
             AI: {
                 moveIntervalMin: 1000, moveIntervalMax: 2000,
-                attackIntervalMin: 1500, attackIntervalMax: 3000,
-                attackProbability: 0.7,
+                attackIntervalMin: 600, attackIntervalMax: 1000, // faster attacks (0.8s to 1.2s)
+                attackProbability: 0.9, // more aggressive
             },
             HEALTH: {
                 max: 100,
@@ -246,6 +246,11 @@
             nextBlockTime: 0,
             blockEndTime: 0,
             blocking: false,
+            isDodging: false,
+            dodgeTimer: 0,
+            dodgeDuration: 0,
+            dodgeDirection: 0,
+            nextDodgeTime: 0,
         };
 
         let raycaster, pointer;
@@ -524,8 +529,9 @@
             // Set initial AI timing values
             const now = clock.getElapsedTime();
             opponent.userData.nextMoveTime = now + Math.random() * (CONFIG.AI.moveIntervalMax - CONFIG.AI.moveIntervalMin) / 1000 + CONFIG.AI.moveIntervalMin / 1000;
-            opponent.userData.nextAttackTime = now + Math.random() * (CONFIG.AI.attackIntervalMax - CONFIG.AI.attackIntervalMin) / 1000 + CONFIG.AI.attackIntervalMin / 1000;
+            opponent.userData.nextAttackTime = now + Math.random() * (CONFIG.AI.attackIntervalMax - CONFIG.AI.attackIntervalMin) / 1000 + CONFIG.AI.attackIntervalMin / 2000;
             opponent.userData.nextJumpTime = now + 1 + Math.random() * 2; // First jump decision in 1-3 seconds
+            opponent.userData.nextDodgeTime = now + 2 + Math.random() * 2; // First dodge decision
             
             scene.add(opponent);
 
@@ -648,6 +654,11 @@
             if (isOpponent) {
                 group.userData.nextJumpTime = clock.getElapsedTime() + 2 + Math.random() * 3; // Initial jump decision in 2-5 seconds
                 group.userData.originalColor = new THREE.Color(1, 1, 1); // Store original color for hit effect
+                group.userData.isDodging = false;
+                group.userData.dodgeTimer = 0;
+                group.userData.dodgeDuration = 0;
+                group.userData.dodgeDirection = 0;
+                group.userData.nextDodgeTime = clock.getElapsedTime() + 2 + Math.random() * 2; // Initial dodge decision
             }
             
             // Load textures
@@ -924,11 +935,13 @@
                 return mesh;
             };
 
-            mobileButtons.left = createButton(CONFIG.COLORS.mobileLeftRight, 'moveLeft', 'left');
-            mobileButtons.right = createButton(CONFIG.COLORS.mobileLeftRight, 'moveRight', 'right');
-            mobileButtons.jump = createButton(CONFIG.COLORS.mobileJump, 'jump', 'up');
-            mobileButtons.punch = createButton(CONFIG.COLORS.mobilePunch, 'attackPunch', 'punch');
-            mobileButtons.kick = createButton(CONFIG.COLORS.mobileKick, 'attackKick', 'kick');
+            mobileButtons.left   = createButton(CONFIG.COLORS.mobileLeftRight, 'moveLeft',  'left');
+            mobileButtons.right  = createButton(CONFIG.COLORS.mobileLeftRight, 'moveRight', 'right');
+            mobileButtons.jump   = createButton(CONFIG.COLORS.mobileJump,      'jump',      'up');
+            mobileButtons.punch  = createButton(CONFIG.COLORS.mobilePunch,     'attackPunch','punch');
+            mobileButtons.kick   = createButton(CONFIG.COLORS.mobileKick,      'attackKick','kick');
+            mobileButtons.block  = createButton(CONFIG.COLORS.mobileLeftRight, 'block',     'block');
+
             positionMobileControls(); // Set initial positions
             // Debug log after positioning
             Object.entries(mobileButtons).forEach(([key, btn]) => {
@@ -972,6 +985,7 @@
             // RIGHT SIDE: Attack buttons
             mobileButtons.punch.position.set(rightX, bottomY, camZOffset);
             mobileButtons.kick.position.set(rightX - btnSize - margin*0.5, bottomY, camZOffset);
+            mobileButtons.block.position.set(rightX - btnSize*2 - margin, bottomY, camZOffset);
         }
 
         function createConfetti() {
@@ -1037,15 +1051,15 @@
             
             // Only process gameplay inputs during gameplay state
             if (gameState === 'gameplay') {
-                // 'c' triggers a kick
+                // 'c' triggers a punch
                 if (event.key === 'c' || event.key === 'C') {
                     event.preventDefault();
-                    handleAttackInput('player', 'kick');
+                    handleAttackInput('player', 'punch');
                 }
-                // 'x' triggers a punch
+                // 'x' triggers a kick
                 if (event.key === 'x' || event.key === 'X') {
                     event.preventDefault();
-                    handleAttackInput('player', 'punch');
+                    handleAttackInput('player', 'kick');
                 }
                 // 'z' triggers block
                 if (event.key === 'z' || event.key === 'Z') {
@@ -1540,14 +1554,19 @@
             if (!opponent.userData.jumping && !opponent.userData.attacking && !opponent.userData.blocking) {
                 // Decide on movement
                 if (now > opponent.userData.nextMoveTime) {
-                    const distance = player.position.x - opponent.position.x;
-                    const absDist = Math.abs(distance);
-                    if (absDist > CHARACTER_HALF_WIDTH * 3) {
-                        opponent.userData.moveDirection = distance > 0 ? 1 : -1;
-                    } else if (absDist < CHARACTER_HALF_WIDTH * 2) {
-                        opponent.userData.moveDirection = distance > 0 ? -1 : 1;
+                    if (opponent.userData.health < CONFIG.HEALTH.max * 0.3) {
+                        // Low health: back away
+                        opponent.userData.moveDirection = (player.position.x > opponent.position.x) ? -1 : 1;
                     } else {
-                        opponent.userData.moveDirection = 0;
+                        const distance = player.position.x - opponent.position.x;
+                        const absDist = Math.abs(distance);
+                        if (absDist > CHARACTER_HALF_WIDTH * 3) {
+                            opponent.userData.moveDirection = distance > 0 ? 1 : -1;
+                        } else if (absDist < CHARACTER_HALF_WIDTH * 2) {
+                            opponent.userData.moveDirection = distance > 0 ? -1 : 1;
+                        } else {
+                            opponent.userData.moveDirection = 0;
+                        }
                     }
                     opponent.userData.nextMoveTime = now + 0.5 + Math.random() * 1;
                 }
@@ -1602,6 +1621,15 @@
                             opponent.userData.body.material.needsUpdate = true;
                             console.log('Opponent started kick animation!');
                         }
+                        // Start punch animation immediately if punch is chosen
+                        if (opponent.userData.attackType === 'punch' && !opponent.userData.isPunching) {
+                            opponent.userData.isPunching = true;
+                            opponent.userData.currentPunchFrame = 0;
+                            opponent.userData.punchTimer = 0;
+                            opponent.userData.body.material.map = opponent.userData.punchTextures[0];
+                            opponent.userData.body.material.needsUpdate = true;
+                            console.log('Opponent started punch animation!');
+                        }
                             
                         console.log('Opponent decided to attack with:', opponent.userData.attackType);
                     }
@@ -1612,12 +1640,36 @@
                 }
             }
             
+            // Dodging logic: sidestep when player attacks nearby
+            if (!opponent.userData.isDodging && !opponent.userData.attacking && !opponent.userData.jumping && !opponent.userData.blocking
+                && now > opponent.userData.nextDodgeTime && player.userData.attacking
+                && Math.abs(opponent.position.x - player.position.x) < (CONFIG.ATTACK.kickReach + 1)) {
+                opponent.userData.isDodging = true;
+                opponent.userData.dodgeTimer = 0;
+                opponent.userData.dodgeDuration = 0.3; // seconds
+                opponent.userData.dodgeDirection = (player.position.x > opponent.position.x) ? -1 : 1;
+                opponent.userData.nextDodgeTime = now + 2 + Math.random() * 2;
+                console.log('Opponent starts dodging');
+            }
+            if (opponent.userData.isDodging) {
+                opponent.userData.dodgeTimer += deltaTime;
+                const dodgeSpeed = CONFIG.MOVEMENT.speed * 2;
+                opponent.position.x += opponent.userData.dodgeDirection * dodgeSpeed * deltaTime;
+                if (opponent.userData.dodgeTimer >= opponent.userData.dodgeDuration) {
+                    opponent.userData.isDodging = false;
+                    console.log('Opponent ends dodging');
+                }
+                updateHealthBar(false, opponent.userData.health);
+                return; // Skip other AI while dodging
+            }
+            
             // Calculate potential new position - only move when not jumping or attacking
             if (!opponent.userData.jumping && !opponent.userData.attacking && !opponent.userData.blocking) {
                 let moveDirection = opponent.userData.moveDirection;
-                let newX = opponent.position.x + moveDirection * CONFIG.MOVEMENT.speed * 0.7;
-                let actuallyMoving = false;
+                let newX = opponent.position.x + moveDirection * CONFIG.MOVEMENT.speed;
+
                 // Check boundaries
+                let finalX = newX;
                 if (newX - CHARACTER_HALF_WIDTH > SCREEN_LEFT && 
                     newX + CHARACTER_HALF_WIDTH < SCREEN_RIGHT) {
                     // Check if this would cause collision with player
@@ -1637,21 +1689,21 @@
                             // Reverse direction when blocked by player
                             opponent.userData.moveDirection *= -1;
                         } else {
-                            actuallyMoving = true;
+                            finalX = newX;
                         }
                     } else {
-                        actuallyMoving = true;
+                        finalX = newX;
                     }
                     // Apply the adjusted position
-                    if (opponent.position.x !== newX) {
-                        opponent.position.x = newX;
+                    if (opponent.position.x !== finalX) {
+                        opponent.position.x = finalX;
                     }
                 } else {
                     // Reverse direction if hitting boundary
                     opponent.userData.moveDirection *= -1;
                 }
                 // Walking animation state logic (mirrors player)
-                const shouldBeWalking = (actuallyMoving && !opponent.userData.attacking && !opponent.userData.jumping && moveDirection !== 0);
+                const shouldBeWalking = (moveDirection !== 0 && !opponent.userData.attacking && !opponent.userData.jumping && moveDirection !== 0);
                 if (shouldBeWalking && (!opponent.userData.isWalking || opponent.userData.walkingDirection !== moveDirection)) {
                     opponent.userData.isWalking = true;
                     opponent.userData.walkingDirection = moveDirection;
