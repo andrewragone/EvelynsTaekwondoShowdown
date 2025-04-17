@@ -175,8 +175,8 @@
             },
             UI: {
                 font: 'bold 32px Arial',
-                fontColor: 'white',
-                outlineColor: 'black',
+                fontColor: 'white', 
+                outlineColor: 'black', 
                 buttonWidth: 1.5, buttonHeight: 0.5,
                 mobileButtonSize: 1.0, // Increased from 0.8 for better touch targets
                 mobileButtonOpacity: 0.9, // Increased from 0.7 for better visibility
@@ -366,6 +366,10 @@
             if (confettiGroup) {
                 scene.remove(confettiGroup);
             }
+            
+            // Remove any existing ending sprite
+            const endSprite = scene.getObjectByName('endSprite');
+            if (endSprite) scene.remove(endSprite);
             
             // Don't remove backgroundSprite
             Object.values(mobileButtons).forEach(btn => { btn.visible = false; });
