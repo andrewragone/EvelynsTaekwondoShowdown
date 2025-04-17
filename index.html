@@ -226,6 +226,7 @@
         let activeMobileInputs = {}; // Track active pointer IDs for mobile buttons
         let backgroundSprite; // New global variable for background sprite
         let gameStarted = false;
+        let playerWon = false; // Flag to track if player won the last round
 
         // Initial player/opponent states
         const initialPlayerState = { jumping: false, velocityY: 0, attacking: false, attackType: 'punch', attackTimer: 0, lastAttackTime: 0, health: CONFIG.HEALTH.max, id: 'player', position: { x: -2 }, blocking: false };
@@ -401,10 +402,12 @@
             scene.add(introCharacter);
             
             const introLines = [
-                "Evelyn's Taekwondo Showdown:", "8th Birthday Party Edition", "",
-                "Get ready to kick it at UMAC Briarcliff!"
+                "Evelyn's Taekwondo",  "Showdown:",
+                "8th Birthday Party", "Edition", "",
+                "Get ready to kick it at ",
+                "UMAC Briarcliff!"
             ];
-            introText = createTextMesh(introLines.join('\n'), { x: 0, y: 0.5, z: 0 }, 0.8, true); // Lowered y to match introCharacter
+            introText = createTextMesh(introLines.join('\n'), { x: 0, y: 1.5, z: 0 }, 0.8, true); // Lowered y to match introCharacter
             introText.material.opacity = 1; // Changed from 0 to 1 to make visible
             scene.add(introText);
 
@@ -446,14 +449,27 @@
         }
 
         function startGameplay() {
-            // Clear any existing intro character
+            // Remove any existing ending images or end sprite when restarting
+            document.querySelectorAll('.ending-image').forEach(img => img.remove());
+            const oldEndSprite = scene.getObjectByName('endSprite');
+            if (oldEndSprite) scene.remove(oldEndSprite);
+            
+            // Remove intro screen mesh and text
             scene.children.forEach(child => {
                 if (child.userData && child.userData.introFadeInTimer !== undefined) {
                     scene.remove(child);
                 }
             });
-            
+            if (introText) {
+                scene.remove(introText);
+                introText = null;
+            }
             clearScene();
+            
+            // Hide health bars
+            document.getElementById('player-health-bar').style.display = 'none';
+            document.getElementById('opponent-health-bar').style.display = 'none';
+            
             gameState = 'gameplay';
             
             // Reset game clock to ensure consistent timing for AI decisions
@@ -515,6 +531,9 @@
         }
 
         function setupEnding() {
+            // Remove any existing ending images
+            document.querySelectorAll('.ending-image').forEach(img => img.remove());
+            
             clearScene();
             
             // Hide health bars
@@ -536,19 +555,27 @@
             gameState = 'ending';
             Object.values(mobileButtons).forEach(btn => { btn.visible = false; });
 
-            player = createCharacter(CONFIG.CHARACTER.giColor, true);
-            player.position.set(0, 0.75, 0);
-            player.userData.victoryAnim = { raising: true, armRotation: 0, holding: false, holdTimer: 0 };
-            scene.add(player);
-
-            const endLines = [
-                "Victory!", "To Be Continued at", "Evelyn's Birthday Party!", "",
-                "Join us at UMAC Briarcliff", "528 N State Rd", 
-                "Briarcliff Manor, NY 10510",
-                 "April 26, 2025 @ 1:00 PM", // *** EXAMPLE PARTY TIME ***
-            ];
-            endText = createTextMesh(endLines.join('\n'), { x: 0, y: 3, z: 0 }, 0.7, true); // Adjusted scale/pos
-            endText.material.opacity = 0;
+            // Choose end text based on win/loss
+            let endLines;
+            if (playerWon) {
+                endLines = [
+                    "Victory!", "To Be Continued at", "Evelyn's Birthday Party!",
+                     "",
+                    "Join us at ", "UMAC Briarcliff", "528 N State Rd",
+                    "Briarcliff Manor, NY 10510",
+                    "April 26, 2025 @ 1:00 PM"
+                ];
+            } else {
+                endLines = [
+                    "Defeat!", "Don't Give Up!", "Try Again at",
+                    "Evelyn's Birthday Party!", "",
+                    "Join us at UMAC Briarcliff", "528 N State Rd",
+                    "Briarcliff Manor, NY 10510",
+                    "April 26, 2025 @ 1:00 PM"
+                ];
+            }
+            endText = createTextMesh(endLines.join('\n'), { x: 0, y: 0.5, z: 0 }, 0.7, true); // Adjusted scale/pos
+            endText.material.opacity = 1;
             scene.add(endText);
 
             // Create a clickable HTML button for Play Again
@@ -583,7 +610,17 @@
 
             createConfetti();
 
-            player.userData.endFadeInTimer = clock.getElapsedTime() + 0.5;
+            // Show a single end image as a Three.js sprite behind the text, scaled to 50%
+            const endImageSrc = playerWon ? 'assets/images/evelyn-won.png' : 'assets/images/evelyn-lost.png';
+            const loader = new THREE.TextureLoader();
+            loader.load(endImageSrc, texture => {
+                const material = new THREE.SpriteMaterial({ map: texture, transparent: true });
+                const endSprite = new THREE.Sprite(material);
+                endSprite.name = 'endSprite';
+                endSprite.position.set(0, 0.5, -1); // behind text at z=-1
+                scaleSpriteToCamera(endSprite, camera, 0.5); // half-size
+                scene.add(endSprite);
+            });
         }
 
         // --- Asset Creation (Mostly unchanged, ensure materials allow transparency where needed) ---
@@ -727,7 +764,7 @@
             const material = new THREE.MeshBasicMaterial({
                 map: texture,
                 transparent: transparent,
-                opacity: transparent ? 0 : 1,
+                opacity: transparent ? 1 : 1,
                 depthTest: false, // Render text on top
                 depthWrite: false,
             });
@@ -1722,10 +1759,11 @@
                         if (target.userData.health <= 0) {
                             if(target.userData.id === 'opponent') {
                                 console.log("Player wins!");
+                                playerWon = true;
                                 setupEnding();
                             } else { // Opponent wins (target is player)
                                 console.log("Opponent wins! Going to end screen.");
-                                // Call setupEnding() for both win/loss
+                                playerWon = false;
                                 setupEnding(); 
                             }
                         }
@@ -1920,7 +1958,6 @@
                 if (character.userData.body.material.map !== character.userData.standingTexture) {
                     character.userData.body.material.map = character.userData.standingTexture;
                     character.userData.body.material.needsUpdate = true;
-                    console.log(`[WALKING ANIM] ${character.userData.id} reset to standing`);
                 }
                 return; // Exit if not walking
             }
@@ -1930,7 +1967,6 @@
                 if (character.userData.body.material.map !== character.userData.blockTexture) {
                     character.userData.body.material.map = character.userData.blockTexture;
                     character.userData.body.material.needsUpdate = true;
-                    console.log(`[WALKING ANIM] ${character.userData.id} reset to blocking after walking`);
                 }
                 return; // Exit after restoring block texture
             }
