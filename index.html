@@ -1371,6 +1371,29 @@
         console.log(`[PUNCH DEBUG] End of updatePlayer. isPunching=${player.userData.isPunching}, currentPunchFrame=${player.userData.currentPunchFrame}`);
     }
             if (player.userData.jumping) {
+                // Horizontal movement during jump for parabolic arc
+                if (moveDirection !== 0) {
+                    let newX = player.position.x + moveDirection * CONFIG.MOVEMENT.speed;
+                    let finalX = newX;
+                    if (newX - CHARACTER_HALF_WIDTH <= SCREEN_LEFT) {
+                        finalX = SCREEN_LEFT + CHARACTER_HALF_WIDTH;
+                    } else if (newX + CHARACTER_HALF_WIDTH >= SCREEN_RIGHT) {
+                        finalX = SCREEN_RIGHT - CHARACTER_HALF_WIDTH;
+                    }
+                    if (opponent) {
+                        const minDistance = CHARACTER_HALF_WIDTH * 1.5;
+                        const potentialDistance = Math.abs(finalX - opponent.position.x);
+                        if (potentialDistance < minDistance) {
+                            if (finalX < opponent.position.x) {
+                                finalX = opponent.position.x - minDistance;
+                            } else {
+                                finalX = opponent.position.x + minDistance;
+                            }
+                        }
+                    }
+                    player.position.x = finalX;
+                }
+                
                 // Apply gravity (scale with deltaTime for consistent behavior)
                 player.userData.velocityY -= CONFIG.MOVEMENT.gravity * deltaTime * 60;
                 
@@ -1668,10 +1691,6 @@
                 attacker.userData.hitThisAttack = false;
             }
             
-            if (!attacker.userData.hitThisFrame) {
-                attacker.userData.hitThisFrame = {};
-            }
-            
             if (!attacker.userData.hitByFrame) {
                 attacker.userData.hitByFrame = {};
             }
@@ -1931,6 +1950,8 @@
             if (!character || !character.userData || !character.userData.body) return;
             
             if (character.userData.jumping) {
+                // Don't override attack animation when kicking/punching in air
+                if (character.userData.isKicking ) return;
                 const body = character.userData.body;
                 const jumpTextures = character.userData.jumpTextures;
                 // Update frame based on vertical position and velocity
@@ -2201,7 +2222,7 @@
         // --- Audio Functions ---
         function initAudio() {
             // Create audio element for background music
-            backgroundMusic = new Audio('assets/audio/09. Ryu Stage.mp3');
+            backgroundMusic = new Audio('assets/music/09. Ryu Stage.mp3');
             backgroundMusic.loop = true;
             backgroundMusic.volume = 0.7; // 70% volume
             
