@@ -625,6 +625,11 @@
                 scaleSpriteToCamera(endSprite, camera, 0.5); // half-size
                 scene.add(endSprite);
             });
+
+            // Play game over audio on ending screen
+            const gameOverSound = new Audio('assets/audio/62. Game Over.mp3');
+            gameOverSound.volume = 0.7;
+            gameOverSound.play();
         }
 
         // --- Asset Creation (Mostly unchanged, ensure materials allow transparency where needed) ---
