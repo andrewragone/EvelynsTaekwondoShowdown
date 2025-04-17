@@ -242,7 +242,10 @@
             velocityY: 0,
             health: CONFIG.HEALTH.max, 
             id: 'opponent', 
-            position: { x: 2 } 
+            position: { x: 2 },
+            nextBlockTime: 0,
+            blockEndTime: 0,
+            blocking: false,
         };
 
         let raycaster, pointer;
@@ -973,6 +976,7 @@
             // First make sure any existing confetti is cleared
             confetti.forEach(confetto => {
                 scene.remove(confetto);
+                // Also dispose of geometries and materials to prevent memory leaks
                 if (confetto.geometry) confetto.geometry.dispose();
                 if (confetto.material) confetto.material.dispose();
             });
@@ -1531,11 +1535,19 @@
             }
             
             // AI decision making - only when not jumping or attacking
-            if (!opponent.userData.jumping && !opponent.userData.attacking) {
+            if (!opponent.userData.jumping && !opponent.userData.attacking && !opponent.userData.blocking) {
                 // Decide on movement
                 if (now > opponent.userData.nextMoveTime) {
-                    opponent.userData.moveDirection = (Math.random() < 0.5) ? -1 : 1;
-                    opponent.userData.nextMoveTime = now + Math.random() * (CONFIG.AI.moveIntervalMax - CONFIG.AI.moveIntervalMin) / 1000 + CONFIG.AI.moveIntervalMin / 1000;
+                    const distance = player.position.x - opponent.position.x;
+                    const absDist = Math.abs(distance);
+                    if (absDist > CHARACTER_HALF_WIDTH * 3) {
+                        opponent.userData.moveDirection = distance > 0 ? 1 : -1;
+                    } else if (absDist < CHARACTER_HALF_WIDTH * 2) {
+                        opponent.userData.moveDirection = distance > 0 ? -1 : 1;
+                    } else {
+                        opponent.userData.moveDirection = 0;
+                    }
+                    opponent.userData.nextMoveTime = now + 0.5 + Math.random() * 1;
                 }
                 
                 // Decide on jumping - 40% chance to jump when decision point is reached
@@ -1554,7 +1566,7 @@
                 // Decide on attacks - more likely to attack when close to player
                 if (now > opponent.userData.nextAttackTime) {
                     console.log('Opponent making attack decision at time', now);
-                    const distanceToPlayer = player ? Math.abs(opponent.position.x - player.position.x) : 999;
+                    const distanceToPlayer = Math.abs(opponent.position.x - player.position.x);
                     let attackProbability = 0.5; // Base probability
                     
                     // Reset hit flag before new attacks
@@ -1604,7 +1616,7 @@
             }
             
             // Calculate potential new position - only move when not jumping or attacking
-            if (!opponent.userData.jumping && !opponent.userData.attacking) {
+            if (!opponent.userData.jumping && !opponent.userData.attacking && !opponent.userData.blocking) {
                 let moveDirection = opponent.userData.moveDirection;
                 let newX = opponent.position.x + moveDirection * CONFIG.MOVEMENT.speed * 0.7;
                 let actuallyMoving = false;
@@ -1673,6 +1685,21 @@
             // Always ensure attacking state is false when not kicking
             if (!opponent.userData.isKicking && opponent.userData.attacking) {
                 opponent.userData.attacking = false;
+            }
+            
+            // Reactive blocking
+            if (!opponent.userData.blocking && now > opponent.userData.nextBlockTime && player.userData.attacking
+                && Math.abs(opponent.position.x - player.position.x) < CHARACTER_HALF_WIDTH * 2) {
+                opponent.userData.blocking = true;
+                opponent.userData.blockEndTime = now + (player.userData.attackTimer/1000 || CONFIG.ATTACK.punchDuration/1000);
+                opponent.userData.nextBlockTime = now + 1 + Math.random() * 2;
+                console.log('Opponent starts blocking');
+                return;
+            }
+            if (opponent.userData.blocking && now > opponent.userData.blockEndTime) {
+                opponent.userData.blocking = false;
+                opponent.userData.body.material.map = opponent.userData.standingTexture;
+                opponent.userData.body.material.needsUpdate = true;
             }
             
             updateHealthBar(false, opponent.userData.health);
@@ -2409,7 +2436,7 @@
                 // For opponent (who is flipped), we need to reverse the direction
                 console.log(`Extending kick box: attacker=${attacker.userData.id}, positions: attacker=${attacker.position.x.toFixed(2)}, target=${target.position.x.toFixed(2)}`);
                 
-                if ((attacker.position.x < target.position.x)) {
+                if (attacker.position.x < target.position.x) {
                     // Extend right
                     overlapCheckAttackerRight = origAttackerRight + extendAmount;
                     console.log(`Extended kick bounding box RIGHT: L=${overlapCheckAttackerLeft.toFixed(2)}, R=${overlapCheckAttackerRight.toFixed(2)}`);
