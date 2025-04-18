@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Evelyn’s Taekwondo Showdown</title>
+    <link rel="icon" href="umac.jpeg" type="image/jpeg">
     <style>
         body { margin: 0; overflow: hidden; background-color: #000; }
         canvas { display: block; }
@@ -120,8 +121,8 @@
         <div id="btn-jump" class="mobile-control">↑</div>
         
         <!-- Right side controls -->
-        <div id="btn-punch" class="mobile-control">C</div>
-        <div id="btn-kick" class="mobile-control">X</div>
+        <div id="btn-punch" class="mobile-control">P</div>
+        <div id="btn-kick" class="mobile-control">K</div>
         <div id="btn-block" class="mobile-control">B</div>
     </div>
     
@@ -164,7 +165,7 @@
             },
             AI: {
                 moveIntervalMin: 1000, moveIntervalMax: 2000,
-                attackIntervalMin: 600, attackIntervalMax: 1000, // faster attacks (0.8s to 1.2s)
+                attackIntervalMin: 600, attackIntervalMax: 800, // faster attacks (0.8s to 1.2s)
                 attackProbability: 0.9, // more aggressive
             },
             HEALTH: {
@@ -622,7 +623,9 @@
             // Store reference - use let instead of const for playAgainButton in the global variables
             playAgainButton = playAgainButtonHTML;
 
-            createConfetti();
+            if (playerWon) {
+                createConfetti();
+            }
 
             // Show a single end image as a Three.js sprite behind the text, scaled to 50%
             const endImageSrc = playerWon ? 'assets/images/evelyn-won.png' : 'assets/images/evelyn-lost.png';
