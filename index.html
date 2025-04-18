@@ -103,8 +103,7 @@
 </head>
 <body>
     <div id="instructions">
-        Desktop: Arrow Keys (Move/Jump), C (Punch), X (Kick), Z (Block)<br>
-        Mobile: Left side - movement arrows, Right side - attack buttons (C=Punch, X=Kick, B=Block)
+        Desktop: Arrow Keys (Move/Jump), Z (Block), X (Kick), C (Punch)<br>
     </div>
     <div id="player-health-bar" class="health-bar">
         <div id="player-health-bar-fill" class="health-bar-fill"></div>
@@ -576,7 +575,8 @@
                 endLines = [
                     "Victory!", "To Be Continued at", "Evelyn's Birthday Party!",
                      "",
-                    "Join us at ", "UMAC Briarcliff", "528 N State Rd",
+                    "Join us at ", "UMAC Briarcliff",
+                    "528 N State Rd",
                     "Briarcliff Manor, NY 10510",
                     "April 26, 2025 @ 1:00 PM"
                 ];
@@ -1219,6 +1219,8 @@
             if (!char.userData.jumping && gameState === 'gameplay') {
                 char.userData.jumping = true;
                 char.userData.velocityY = CONFIG.MOVEMENT.jumpVelocity;
+                char.userData.jumpTimer = 0; // Reset jump timer
+                char.userData.hasJumpSwapped = false; // Reset swap flag
                 // Set initial jump frame
                 char.userData.body.material.map = char.userData.jumpTextures[0];
                 char.userData.body.material.needsUpdate = true;
@@ -1291,9 +1293,6 @@
 
         // --- Game Logic ---
         function updatePlayer(deltaTime) {
-    if (player && player.userData) {
-        console.log(`[PUNCH DEBUG] updatePlayer called. isPunching=${player.userData.isPunching}, isKicking=${player.userData.isKicking}, isJumping=${player.userData.jumping}, currentPunchFrame=${player.userData.currentPunchFrame}`);
-    }
             if (gameState !== 'gameplay' || !player) return;
             
             // Get current time for animation debugging
@@ -1394,10 +1393,6 @@
             }
 
             // 5. Handle jumping physics
-    // DEBUG: End of updatePlayer, punch state
-    if (player && player.userData) {
-        console.log(`[PUNCH DEBUG] End of updatePlayer. isPunching=${player.userData.isPunching}, currentPunchFrame=${player.userData.currentPunchFrame}`);
-    }
             if (player.userData.jumping) {
                 // Horizontal movement during jump for parabolic arc
                 if (moveDirection !== 0) {
@@ -1579,6 +1574,8 @@
                     // Initiate jump
                     opponent.userData.jumping = true;
                     opponent.userData.velocityY = CONFIG.MOVEMENT.jumpVelocity;
+                    opponent.userData.jumpTimer = 0; // Reset jump timer
+                opponent.userData.hasJumpSwapped = false; // Reset swap flag
                     opponent.userData.body.material.map = opponent.userData.jumpTextures[0];
                     opponent.userData.body.material.needsUpdate = true;
                     
@@ -1616,7 +1613,7 @@
                             CONFIG.ATTACK.punchDuration : CONFIG.ATTACK.kickDuration;
                             
                         // Start kick animation immediately if kick is chosen
-                        if (opponent.userData.attackType === 'kick' && !opponent.userData.isKicking) {
+                        if (opponent.userData.attackType === 'kick') {
                             opponent.userData.isKicking = true;
                             opponent.userData.currentKickFrame = 0;
                             opponent.userData.kickTimer = 0;
@@ -1625,7 +1622,7 @@
                             console.log('Opponent started kick animation!');
                         }
                         // Start punch animation immediately if punch is chosen
-                        if (opponent.userData.attackType === 'punch' && !opponent.userData.isPunching) {
+                        if (opponent.userData.attackType === 'punch') {
                             opponent.userData.isPunching = true;
                             opponent.userData.currentPunchFrame = 0;
                             opponent.userData.punchTimer = 0;
@@ -2034,20 +2031,17 @@
             if (!character || !character.userData || !character.userData.body) return;
             
             if (character.userData.jumping) {
-                // Don't override attack animation when kicking/punching in air
-                if (character.userData.isKicking ) return;
+                // Increment timer and set swap flag once
+                character.userData.jumpTimer = (character.userData.jumpTimer || 0) + deltaTime;
+                if (character.userData.jumpTimer >= 0.15 && !character.userData.hasJumpSwapped) {
+                    character.userData.hasJumpSwapped = true;
+                }
                 const body = character.userData.body;
                 const jumpTextures = character.userData.jumpTextures;
-                // Update frame based on vertical position and velocity
-                if (character.position.y > 0.5) {
-                    // In air - use second frame
-                    body.material.map = jumpTextures[1];
-                } else if (character.position.y > 0) {
-                    // Initial jump or landing - use first frame
-                    body.material.map = jumpTextures[0];
-                }
-                // Note: We don't set standing texture here - it's handled in updatePlayer
-                // when character actually lands (position.y <= GROUND_Y)
+                // Don't override attack animation in air
+                if (character.userData.isKicking) return;
+                // Use initial frame until swapped, then persist second frame
+                body.material.map = character.userData.hasJumpSwapped ? jumpTextures[1] : jumpTextures[0];
                 body.material.needsUpdate = true;
             } else if (character.position.y === GROUND_Y) {
                 // Safety check - ensure standing texture when on ground
@@ -2115,10 +2109,6 @@
 
         // Punch animation handler
         function updatePunchAnimation(character, deltaTime, targetCharacter) {
-    // DEBUG: Punch animation handler called
-    if (character && character.userData && character.userData.id) {
-        console.log(`[PUNCH DEBUG] updatePunchAnimation called for ${character.userData.id}. isPunching=${character.userData.isPunching}, currentPunchFrame=${character.userData.currentPunchFrame}, punchTimer=${character.userData.punchTimer}`);
-    }
             if (!character || !character.userData || !character.userData.body || !character.userData.isPunching) return;
             // Animation timing
             const punchFrames = character.userData.punchTextures.length;
@@ -2126,15 +2116,6 @@
             const frameDuration = punchDuration / punchFrames;
             character.userData.punchTimer = (character.userData.punchTimer || 0) + deltaTime * 1000;
             let frame = Math.floor(character.userData.punchTimer / frameDuration);
-    // DEBUG: Calculated punch frame
-    if (character && character.userData) {
-        console.log(`[PUNCH DEBUG] Frame calculation: punchTimer=${character.userData.punchTimer}, frameDuration=${frameDuration}, frame=${frame}`);
-    }
-            if (frame >= punchFrames) frame = punchFrames - 1;
-    // DEBUG: Frame after clamp
-    if (character && character.userData) {
-        console.log(`[PUNCH DEBUG] Frame after clamp: frame=${frame}, punchFrames=${punchFrames}`);
-    }
             character.userData.currentPunchFrame = frame;
             // Set punch frame texture
             character.userData.body.material.map = character.userData.punchTextures[frame];
@@ -2154,7 +2135,6 @@
             }
             // End animation
             if (character.userData.punchTimer >= punchDuration) {
-        console.log(`[PUNCH DEBUG] Punch animation finished for ${character.userData.id}`);
                 character.userData.isPunching = false;
                 character.userData.attacking = false;
                 character.userData.punchTimer = 0;
